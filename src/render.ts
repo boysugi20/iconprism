@@ -6,6 +6,8 @@ export type Mask = 'none' | 'circle' | 'squircle' | 'rounded';
 export interface IconImages {
   full: HTMLImageElement;
   bg: HTMLImageElement | null;
+  /** Background on the 108 dp canvas (artboard = centre 72 dp), for adaptive and maskable icons. */
+  bgBleed: HTMLImageElement | null;
   fg: HTMLImageElement;
 }
 
@@ -21,9 +23,21 @@ export async function loadSvg(svg: string): Promise<HTMLImageElement> {
   return img;
 }
 
-export async function loadImages(svgs: { full: string; bg: string | null; fg: string }): Promise<IconImages> {
-  const [full, bg, fg] = await Promise.all([loadSvg(svgs.full), svgs.bg ? loadSvg(svgs.bg) : null, loadSvg(svgs.fg)]);
-  return { full, bg, fg };
+export interface IconSvgs {
+  full: string;
+  bg: string | null;
+  bgBleed: string | null;
+  fg: string;
+}
+
+export async function loadImages(svgs: IconSvgs): Promise<IconImages> {
+  const [full, bg, bgBleed, fg] = await Promise.all([
+    loadSvg(svgs.full),
+    svgs.bg ? loadSvg(svgs.bg) : null,
+    svgs.bgBleed ? loadSvg(svgs.bgBleed) : null,
+    loadSvg(svgs.fg),
+  ]);
+  return { full, bg, bgBleed, fg };
 }
 
 function canvas(size: number) {
@@ -76,6 +90,27 @@ export function drawFull(imgs: IconImages, size: number, mask: Mask = 'none', op
   return c;
 }
 
+/** The artwork without its background: iOS dark icons, and greyscale for iOS tinted icons. */
+export function drawForeground(imgs: IconImages, size: number, opts: { grayscale?: boolean; under?: string } = {}) {
+  const { c, ctx } = canvas(size);
+  ctx.drawImage(imgs.fg, 0, 0, size, size);
+  if (opts.grayscale) {
+    const data = ctx.getImageData(0, 0, size, size);
+    const px = data.data;
+    for (let i = 0; i < px.length; i += 4) {
+      const l = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+      px[i] = px[i + 1] = px[i + 2] = l;
+    }
+    ctx.putImageData(data, 0, 0);
+  }
+  if (opts.under) {
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.fillStyle = opts.under;
+    ctx.fillRect(0, 0, size, size);
+  }
+  return c;
+}
+
 /**
  * Adaptive icon layers use a 108dp canvas whose visible viewport is the centre 72dp.
  * The artboard maps to that viewport, so the foreground sits in the middle two thirds.
@@ -91,7 +126,8 @@ export function drawAdaptiveFg(imgs: IconImages, size: number) {
 
 export function drawAdaptiveBg(imgs: IconImages, size: number) {
   const { c, ctx } = canvas(size);
-  if (imgs.bg) ctx.drawImage(imgs.bg, 0, 0, size, size);
+  const bg = imgs.bgBleed ?? imgs.bg;
+  if (bg) ctx.drawImage(bg, 0, 0, size, size);
   else {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, size, size);
@@ -111,6 +147,66 @@ export function drawAdaptive(imgs: IconImages, size: number, mask: Mask = 'none'
 export async function png(c: HTMLCanvasElement): Promise<Uint8Array> {
   const blob = await new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('PNG encode failed'))), 'image/png'));
   return new Uint8Array(await blob.arrayBuffer());
+}
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(bytes: Uint8Array) {
+  let c = 0xffffffff;
+  for (const b of bytes) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function chunk(type: string, data: Uint8Array) {
+  const out = new Uint8Array(12 + data.length);
+  const v = new DataView(out.buffer);
+  v.setUint32(0, data.length);
+  const body = out.subarray(4, 8 + data.length);
+  body.set([...type].map((ch) => ch.charCodeAt(0)));
+  body.set(data, 4);
+  v.setUint32(8 + data.length, crc32(body));
+  return out;
+}
+
+/**
+ * PNG without an alpha channel (colour type 2). App Store Connect rejects app icons
+ * with an alpha channel even when every pixel is opaque, and canvas.toBlob always writes RGBA.
+ */
+export async function pngRGB(c: HTMLCanvasElement): Promise<Uint8Array> {
+  return encodeRGB(c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
+}
+
+/** Encodes RGBA pixels as an RGB PNG, dropping alpha. */
+export async function encodeRGB(px: Uint8ClampedArray | Uint8Array, w: number, h: number): Promise<Uint8Array> {
+  const raw = new Uint8Array(h * (1 + w * 3));
+  for (let y = 0, o = 0; y < h; y++) {
+    raw[o++] = 0; // filter: none
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      raw[o++] = px[i];
+      raw[o++] = px[i + 1];
+      raw[o++] = px[i + 2];
+    }
+  }
+  const zipped = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer());
+  const ihdr = new Uint8Array(13);
+  const v = new DataView(ihdr.buffer);
+  v.setUint32(0, w);
+  v.setUint32(4, h);
+  ihdr.set([8, 2, 0, 0, 0], 8); // 8-bit, truecolour, deflate, adaptive filtering, no interlace
+  const parts = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zipped), chunk('IEND', new Uint8Array())];
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
 }
 
 /** Packs PNG images into a .ico file (PNG-compressed entries, supported since Windows Vista). */

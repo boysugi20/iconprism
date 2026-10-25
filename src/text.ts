@@ -77,6 +77,7 @@ export interface LoadedFont {
 
 const cache = new Map<string, Promise<LoadedFont>>();
 const custom = new Map<string, FontInfo>();
+let customCount = 0;
 
 export function fontInfo(id: string): FontInfo | undefined {
   return FONTS.find((f) => f.id === id) ?? custom.get(id);
@@ -128,7 +129,8 @@ export async function addCustomFont(file: File): Promise<string> {
   const name = font.names.fontFamily?.en || file.name.replace(/\.[^.]+$/, '');
   const weight = (font.tables.os2 as { usWeightClass?: number } | undefined)?.usWeightClass ?? 400;
   const id = `custom:${name}:${weight}`;
-  const family = `ip-custom-${custom.size}`;
+  if (custom.has(id)) return id;
+  const family = `ip-custom-${customCount++}`;
   await register(family, buffer.slice(0), weight);
   custom.set(id, { id, name: `${name} (uploaded)`, weights: [weight] });
   cache.set(`${id}:${weight}`, Promise.resolve({ font, family }));

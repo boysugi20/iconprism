@@ -34,7 +34,7 @@ export interface Guides {
 
 type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 type Drag =
-  | { kind: 'move'; moved: boolean }
+  | { kind: 'move'; moved: boolean; start?: paper.Rectangle; raw?: paper.Point; applied?: paper.Point }
   | { kind: 'scale'; handle: Handle; anchor: paper.Point; start: paper.Rectangle; fx: number; fy: number }
   | { kind: 'marquee'; from: paper.Point; to: paper.Point; add: boolean }
   | { kind: 'create'; from: paper.Point; item: paper.Item | null }
@@ -62,7 +62,7 @@ function handlePoint(b: paper.Rectangle, h: Handle): paper.Point {
 /** Modifier keys from the native mouse event; Paper's own key tracking can miss key-ups. */
 function mods(e: paper.ToolEvent) {
   const n = (e as unknown as { event?: MouseEvent }).event;
-  return { shift: !!n?.shiftKey, alt: !!n?.altKey };
+  return { shift: !!n?.shiftKey, alt: !!n?.altKey, noSnap: !!(n?.metaKey || n?.ctrlKey) };
 }
 
 export function isText(item: paper.Item | null | undefined): item is paper.CompoundPath {
@@ -101,8 +101,14 @@ function hex(c: paper.Color | null | undefined): string {
 /** Reads the fill spec back from an item, including items imported from SVG. */
 export function readFill(item: paper.Item): Fill {
   const stored = item.data?.fill as Fill | undefined;
-  if (stored) return { ...stored };
   const c = item.fillColor;
+  if (stored) {
+    // Rotate and flip turn the real gradient, so trust its live direction over the stored angle.
+    const g = c as unknown as { gradient?: unknown; origin?: paper.Point; destination?: paper.Point } | null;
+    if (stored.type === 'linear' && g?.gradient && g.origin && g.destination)
+      return { ...stored, angle: Math.round(g.destination.subtract(g.origin).angle) };
+    return { ...stored };
+  }
   if (!c) return { type: 'none', color: '#ffffff', color2: '#000000', angle: 90 };
   if (c.gradient) {
     const stops = c.gradient.stops;
@@ -137,6 +143,8 @@ export class Editor {
   /** Text tool click or double-click on text: the UI opens the on-canvas editor. */
   onEditText = (_req: { item: paper.CompoundPath | null; at: paper.Point }) => {};
   onNotice = (_msg: string) => {};
+  /** Called before undo or redo, so the UI can close the text editor first. */
+  onBeforeHistory = () => {};
   newText: TextSpec = { ...DEFAULT_TEXT };
 
   private board: paper.Layer;
@@ -144,8 +152,18 @@ export class Editor {
   private bgRect: paper.Path;
   private content: paper.Layer;
   private guideLayer: paper.Layer;
+  /** In-progress pen path: shown on canvas, never saved or exported until finished. */
+  private draft: paper.Layer;
   private ui: paper.Layer;
+  private refLayer: paper.Layer;
   private drag: Drag | null = null;
+  /** Snap lines currently shown while dragging. */
+  private snapGuides: { x: number[]; y: number[] } = { x: [], y: [] };
+  /** Snap to the artboard and other shapes while moving, resizing and drawing. Hold ⌘/Ctrl to skip. */
+  snapOn = true;
+  /** False on a first visit, so the UI can offer templates. */
+  hadSavedDoc = false;
+  reference: { src: string | null; opacity: number; visible: boolean } = { src: null, opacity: 0.4, visible: true };
   private penPath: paper.Path | null = null;
   private history: string[] = [];
   private hIndex = -1;
@@ -158,8 +176,12 @@ export class Editor {
     this.board = paper.project.activeLayer;
     this.bgLayer = new paper.Layer();
     this.bgRect = new paper.Path.Rectangle(new paper.Rectangle(0, 0, ART, ART));
+    // Reference image for tracing: above the background, below the artwork, never exported.
+    this.refLayer = new paper.Layer();
+    this.refLayer.locked = true;
     this.content = new paper.Layer();
     this.content.selectedColor = new paper.Color(ACCENT);
+    this.draft = new paper.Layer();
     this.guideLayer = new paper.Layer();
     this.guideLayer.locked = true;
     this.ui = new paper.Layer();
@@ -183,7 +205,8 @@ export class Editor {
       }
     });
 
-    if (!this.restore()) this.starter();
+    this.hadSavedDoc = this.restore();
+    if (!this.hadSavedDoc) this.starter();
     this.applyBackground();
     this.drawGuides();
     this.commit();
@@ -250,15 +273,47 @@ export class Editor {
 
   // ---------------------------------------------------------------- history
 
+  /** Item hidden while its text is being typed on the canvas; saved as visible. */
+  private editingHidden: paper.Item | null = null;
+  /** Bumped whenever the whole document is replaced, so async work can tell it went stale. */
+  private docVersion = 0;
+
+  hideForEditing(item: paper.Item | null) {
+    if (this.editingHidden && this.editingHidden !== item) this.editingHidden.visible = true;
+    this.editingHidden = item;
+    if (item) item.visible = false;
+  }
+
   private serialize() {
-    return JSON.stringify({ v: 1, background: this.background, content: this.content.exportJSON({ asString: false }) });
+    const hidden = this.editingHidden;
+    if (hidden) hidden.visible = true;
+    const content = this.content.exportJSON({ asString: false }) as unknown;
+    if (hidden) hidden.visible = false;
+    // Selection is UI state: keep it out of history so undo never lands on a no-op step.
+    const strip = (node: unknown): void => {
+      if (!Array.isArray(node)) return;
+      const props = node[1];
+      if (props && typeof props === 'object' && !Array.isArray(props)) {
+        delete (props as Record<string, unknown>).selected;
+        const kids = (props as Record<string, unknown>).children;
+        if (Array.isArray(kids)) kids.forEach(strip);
+      }
+    };
+    strip(content);
+    return JSON.stringify({ v: 1, background: this.background, content });
   }
 
   private load(snap: string) {
     const d = JSON.parse(snap);
-    this.background = d.background;
+    // Validate before touching anything, so a bad snapshot leaves the document as it was.
+    if (d?.v !== 1 || !d.background?.fill || !Array.isArray(d.content)) throw new Error('Unrecognised document');
+    const scratch = new paper.Layer({ insert: false });
+    scratch.importJSON(d.content);
+    this.editingHidden = null;
     this.content.removeChildren();
-    this.content.importJSON(d.content);
+    this.content.addChildren(scratch.removeChildren());
+    this.background = d.background;
+    this.docVersion++;
     paper.project.deselectAll();
     this.applyBackground();
     this.select([]);
@@ -279,6 +334,7 @@ export class Editor {
 
   undo() {
     this.finishPen();
+    this.onBeforeHistory();
     if (this.hIndex <= 0) return;
     this.load(this.history[--this.hIndex]);
     this.persist(this.history[this.hIndex]);
@@ -286,6 +342,8 @@ export class Editor {
   }
 
   redo() {
+    this.finishPen();
+    this.onBeforeHistory();
     if (this.hIndex >= this.history.length - 1) return;
     this.load(this.history[++this.hIndex]);
     this.persist(this.history[this.hIndex]);
@@ -295,8 +353,18 @@ export class Editor {
   get canUndo() { return this.hIndex > 0; }
   get canRedo() { return this.hIndex < this.history.length - 1; }
 
+  private saveFailed = false;
+
   private persist(snap: string) {
-    try { localStorage.setItem(STORAGE_KEY, snap); } catch { /* storage full or blocked */ }
+    try {
+      localStorage.setItem(STORAGE_KEY, snap);
+      this.saveFailed = false;
+    } catch {
+      // Don't leave an older copy behind to be restored silently later.
+      try { localStorage.removeItem(STORAGE_KEY); } catch { /* storage blocked */ }
+      if (!this.saveFailed) this.onNotice('Autosave failed: this icon is too large for browser storage. Export or download the SVG to keep it.');
+      this.saveFailed = true;
+    }
   }
 
   private restore(): boolean {
@@ -306,12 +374,30 @@ export class Editor {
       this.load(snap);
       return true;
     } catch {
+      try { localStorage.removeItem(STORAGE_KEY); } catch { /* storage blocked */ }
       return false;
     }
   }
 
+  /** Replaces the document with a template, as one undo step. */
+  async applyTemplate(t: { background: Background; build(editor: Editor): Promise<void> | void }) {
+    this.finishPen();
+    this.hideForEditing(null);
+    this.docVersion++;
+    this.content.removeChildren();
+    this.background = { enabled: t.background.enabled, fill: { ...t.background.fill } };
+    this.applyBackground();
+    this.content.activate();
+    await t.build(this);
+    this.setTool('select');
+    this.select([]);
+    this.commit();
+  }
+
   clearAll() {
     this.finishPen();
+    this.hideForEditing(null);
+    this.docVersion++;
     this.content.removeChildren();
     this.select([]);
     this.commit();
@@ -328,7 +414,7 @@ export class Editor {
   }
 
   selectAll() {
-    this.select(this.content.children.slice());
+    this.select(this.content.children.filter((c) => c.visible && !c.locked));
   }
 
   /** Selection in stacking order, bottom first. */
@@ -381,6 +467,11 @@ export class Editor {
         rectangle: extra.marquee, parent: ui, strokeColor: ACCENT, strokeWidth: 1, strokeScaling: false,
         dashArray: [4, 3], fillColor: new paper.Color(0.89, 1, 0.31, 0.08),
       });
+    const span = 100000;
+    for (const x of this.snapGuides.x)
+      new paper.Path.Line({ from: [x, -span], to: [x, span], parent: ui, strokeColor: '#ff5ec8', strokeWidth: 1, strokeScaling: false });
+    for (const y of this.snapGuides.y)
+      new paper.Path.Line({ from: [-span, y], to: [span, y], parent: ui, strokeColor: '#ff5ec8', strokeWidth: 1, strokeScaling: false });
     if (extra?.rubber)
       new paper.Path.Line({ from: extra.rubber[0], to: extra.rubber[1], parent: ui, strokeColor: ACCENT, strokeWidth: 1, strokeScaling: false, dashArray: [4, 3] });
   }
@@ -413,7 +504,7 @@ export class Editor {
       case 'node': return this.nodeDown(e);
       case 'pen': return this.penDown(e);
       case 'text': return this.textDown(e);
-      default: this.drag = { kind: 'create', from: e.point, item: null };
+      default: this.drag = { kind: 'create', from: this.snapPoint(e.point, mods(e).noSnap), item: null };
     }
   }
 
@@ -431,12 +522,34 @@ export class Editor {
         this.onView();
         return;
       }
-      case 'move':
-        this.selection.forEach((i) => i.translate(e.delta));
+      case 'move': {
+        if (!d.start) {
+          d.start = this.selBounds() ?? undefined;
+          d.raw = new paper.Point(0, 0);
+          d.applied = new paper.Point(0, 0);
+        }
+        if (!d.start || !d.raw || !d.applied) return;
+        d.raw = d.raw.add(e.delta);
+        let offset = d.raw;
+        this.snapGuides = { x: [], y: [] };
+        if (this.snapOn && !mods(e).noSnap) {
+          const target = d.start.clone();
+          target.point = target.point.add(d.raw);
+          const lines = this.snapLines(new Set(this.selection));
+          const sx = this.snapAxis([target.left, target.center.x, target.right], lines.x);
+          const sy = this.snapAxis([target.top, target.center.y, target.bottom], lines.y);
+          offset = offset.add(new paper.Point(sx?.delta ?? 0, sy?.delta ?? 0));
+          if (sx) this.snapGuides.x.push(sx.line);
+          if (sy) this.snapGuides.y.push(sy.line);
+        }
+        const step = offset.subtract(d.applied);
+        this.selection.forEach((i) => i.translate(step));
+        d.applied = offset;
         d.moved = true;
         this.drawUI();
         this.onLive();
         return;
+      }
       case 'scale':
         return this.scaleDrag(d, e);
       case 'marquee':
@@ -444,7 +557,7 @@ export class Editor {
         this.drawUI({ marquee: new paper.Rectangle(d.from, d.to) });
         return;
       case 'create':
-        return this.createDrag(d, e);
+        return this.createDrag(d, this.snapEvent(e));
       case 'segments':
         for (const p of this.selectedPaths())
           for (const s of p.segments) if (s.selected) s.point = s.point.add(e.delta);
@@ -473,6 +586,10 @@ export class Editor {
   private up(e: paper.ToolEvent) {
     const d = this.drag;
     this.drag = null;
+    if (this.snapGuides.x.length || this.snapGuides.y.length) {
+      this.snapGuides = { x: [], y: [] };
+      this.drawUI();
+    }
     if (!d) return;
     switch (d.kind) {
       case 'move':
@@ -486,7 +603,7 @@ export class Editor {
         return;
       case 'marquee': {
         const r = new paper.Rectangle(d.from, d.to);
-        const hits = r.width < 2 && r.height < 2 ? [] : this.content.children.filter((c) => r.intersects(c.bounds));
+        const hits = r.width < 2 && r.height < 2 ? [] : this.content.children.filter((c) => c.visible && !c.locked && r.intersects(c.bounds));
         this.select(d.add ? [...new Set([...this.selection, ...hits])] : hits);
         return;
       }
@@ -539,13 +656,17 @@ export class Editor {
   }
 
   private scaleDrag(d: Extract<Drag, { kind: 'scale' }>, e: paper.ToolEvent) {
+    e = this.snapEvent(e, new Set(this.selection));
     const hp = handlePoint(d.start, d.handle);
     const horiz = d.handle.includes('e') || d.handle.includes('w');
     const vert = d.handle.includes('n') || d.handle.includes('s');
     let fx = horiz && hp.x !== d.anchor.x ? (e.point.x - d.anchor.x) / (hp.x - d.anchor.x) : 1;
     let fy = vert && hp.y !== d.anchor.y ? (e.point.y - d.anchor.y) / (hp.y - d.anchor.y) : 1;
     if (mods(e).shift) {
-      const f = horiz && vert ? Math.max(Math.abs(fx), Math.abs(fy)) : Math.abs(horiz ? fx : fy);
+      // A flat selection (a horizontal or vertical line) scales by its one real axis.
+      const flatX = !d.start.width;
+      const flatY = !d.start.height;
+      const f = horiz && vert && !flatX && !flatY ? Math.max(Math.abs(fx), Math.abs(fy)) : Math.abs(flatY || !vert ? fx : fy);
       fx = Math.sign(fx || 1) * f;
       fy = Math.sign(fy || 1) * f;
       if (!horiz) fx = f;
@@ -628,9 +749,11 @@ export class Editor {
         this.finishPen();
         return;
       }
-      p.add(e.point);
+      const pt = this.snapPoint(e.point, mods(e).noSnap);
+      // The two clicks of a double-click (used to finish) must not add duplicate points.
+      if (pt.getDistance(p.lastSegment.point) > 2 / paper.view.zoom) p.add(pt);
     } else {
-      this.penPath = new paper.Path({ segments: [e.point], strokeColor: ACCENT, strokeWidth: 1.5, strokeScaling: false });
+      this.penPath = new paper.Path({ segments: [this.snapPoint(e.point, mods(e).noSnap)], strokeColor: ACCENT, strokeWidth: 1.5, strokeScaling: false, parent: this.draft });
     }
     this.drag = { kind: 'pen' };
   }
@@ -638,12 +761,15 @@ export class Editor {
   finishPen() {
     const p = this.penPath;
     this.penPath = null;
+    if (p) this.content.addChild(p);
     if (!p) return;
     this.drawUI();
     if (p.segments.length < 2) { p.remove(); return; }
     p.strokeScaling = true;
     p.strokeColor = null;
+    p.strokeWidth = 1;
     this.styleNew(p, !p.closed);
+    if (this.tool === 'pen') this.setTool('select');
     this.select([p]);
     this.commit();
   }
@@ -657,7 +783,12 @@ export class Editor {
    * Creates or rewrites a text item from its spec. Text keeps its own matrix
    * (applyMatrix off), so moves, scales and rotations survive re-editing.
    */
-  async writeText(item: paper.CompoundPath | null, at: paper.Point, spec: TextSpec): Promise<paper.CompoundPath | null> {
+  async writeText(
+    item: paper.CompoundPath | null,
+    at: paper.Point,
+    spec: TextSpec,
+    opts: { silent?: boolean; fill?: Fill } = {},
+  ): Promise<paper.CompoundPath | null> {
     if (!spec.content.trim()) {
       if (item) {
         item.remove();
@@ -667,19 +798,23 @@ export class Editor {
       return null;
     }
     spec = { ...spec, weight: nearestWeight(spec.font, spec.weight) };
+    const version = this.docVersion;
     const { font } = await loadFont(spec.font, spec.weight);
+    // The document changed while the font loaded (undo, delete, new): drop this write.
+    if (version !== this.docVersion || (item && !item.parent)) return null;
     const d = textPathData(font, spec);
     if (!item || !item.parent) {
       this.content.activate();
       item = new paper.CompoundPath({ applyMatrix: false });
       item.translate(at);
       item.pathData = d;
-      applyFill(item, this.newFill.type === 'none' ? solid('#ffffff') : this.newFill);
+      applyFill(item, opts.fill ?? (this.newFill.type === 'none' ? solid('#ffffff') : this.newFill));
     } else {
       item.pathData = d;
       if (item.data.fill?.type === 'linear') applyFill(item, item.data.fill);
     }
     item.data.text = { ...spec };
+    if (opts.silent) return item;
     if (this.tool !== 'select') this.setTool('select');
     this.select([item]);
     this.commit();
@@ -693,7 +828,8 @@ export class Editor {
       this.newText = { ...this.newText, ...patch };
       return;
     }
-    for (const it of items) await this.writeText(it, it.position, { ...it.data.text, ...patch });
+    for (const it of items) await this.writeText(it, it.position, { ...it.data.text, ...patch }, { silent: true });
+    this.commit();
     this.select(items);
   }
 
@@ -717,7 +853,8 @@ export class Editor {
   }
 
   private nodeDown(e: paper.ToolEvent) {
-    const hit = this.content.hitTest(e.point, { segments: true, handles: true, stroke: true, fill: true, tolerance: 6 / paper.view.zoom });
+    // `curves` hits path edges even when the shape has no stroke.
+    const hit = this.content.hitTest(e.point, { segments: true, handles: true, curves: true, fill: true, tolerance: 6 / paper.view.zoom });
     if (!hit) { this.select([]); return; }
     let owner: paper.Item = hit.item;
     while (owner.parent && owner.parent !== this.content) owner = owner.parent;
@@ -734,8 +871,8 @@ export class Editor {
       this.drag = { kind: 'segments', moved: false };
     } else if (hit.type === 'handle-in' || hit.type === 'handle-out') {
       this.drag = { kind: 'handle', segment: hit.segment, which: hit.type === 'handle-in' ? 'in' : 'out' };
-    } else if (hit.type === 'stroke' && hit.location && hit.item instanceof paper.Path) {
-      const seg = hit.item.divideAt(hit.location) as unknown as paper.Segment | null;
+    } else if ((hit.type === 'curve' || hit.type === 'stroke') && hit.location) {
+      const seg = (hit.location.path as paper.Path).divideAt(hit.location) as unknown as paper.Segment | null;
       this.clearSegments();
       if (seg) seg.selected = true;
       this.drag = { kind: 'segments', moved: true };
@@ -750,6 +887,7 @@ export class Editor {
       for (let i = p.segments.length - 1; i >= 0; i--) if (p.segments[i].selected) p.removeSegment(i);
       if (p.segments.length < 2) p.remove();
     }
+    for (const it of this.selection) if (it.parent && it.isEmpty()) it.remove();
     this.select(this.selection.filter((i) => i.parent));
     this.commit();
   }
@@ -777,6 +915,115 @@ export class Editor {
       }
     }
   }
+
+  // ---------------------------------------------------------------- snapping
+
+  /** Artboard edges and centre, plus the edges and centres of other visible shapes. */
+  private snapLines(exclude = new Set<paper.Item>()) {
+    const x = [0, ART / 2, ART];
+    const y = [0, ART / 2, ART];
+    for (const c of this.content.children) {
+      if (exclude.has(c) || !c.visible) continue;
+      const b = c.bounds;
+      x.push(b.left, b.center.x, b.right);
+      y.push(b.top, b.center.y, b.bottom);
+    }
+    return { x, y };
+  }
+
+  private snapAxis(values: number[], lines: number[]): { delta: number; line: number } | null {
+    const tol = 6 / paper.view.zoom;
+    let best: { delta: number; line: number } | null = null;
+    for (const v of values)
+      for (const l of lines) {
+        const delta = l - v;
+        if (Math.abs(delta) <= tol && (!best || Math.abs(delta) < Math.abs(best.delta))) best = { delta, line: l };
+      }
+    return best;
+  }
+
+  private snapPoint(pt: paper.Point, skip = false, exclude?: Set<paper.Item>): paper.Point {
+    this.snapGuides = { x: [], y: [] };
+    if (!this.snapOn || skip) return pt;
+    const lines = this.snapLines(exclude);
+    const sx = this.snapAxis([pt.x], lines.x);
+    const sy = this.snapAxis([pt.y], lines.y);
+    if (sx) this.snapGuides.x.push(sx.line);
+    if (sy) this.snapGuides.y.push(sy.line);
+    return new paper.Point(pt.x + (sx?.delta ?? 0), pt.y + (sy?.delta ?? 0));
+  }
+
+  /** Same event with its point snapped; modifiers stay readable. */
+  private snapEvent(e: paper.ToolEvent, exclude?: Set<paper.Item>): paper.ToolEvent {
+    const exc = new Set(exclude);
+    if (this.drag?.kind === 'create' && this.drag.item) exc.add(this.drag.item);
+    const point = this.snapPoint(e.point, mods(e).noSnap, exc);
+    // A plain object: ToolEvent's own properties are getters and cannot be overwritten.
+    return { point, delta: e.delta, event: (e as unknown as { event: MouseEvent }).event } as unknown as paper.ToolEvent;
+  }
+
+  // ---------------------------------------------------------------- layers
+
+  /** Top-level items, top of the stack first. */
+  layers(): paper.Item[] {
+    return this.content.children.slice().reverse();
+  }
+
+  setItemVisible(item: paper.Item, visible: boolean) {
+    item.visible = visible;
+    if (!visible) this.select(this.selection.filter((i) => i !== item));
+    this.commit();
+  }
+
+  setItemLocked(item: paper.Item, locked: boolean) {
+    item.locked = locked;
+    if (locked) this.select(this.selection.filter((i) => i !== item));
+    this.commit();
+  }
+
+  renameItem(item: paper.Item, name: string) {
+    item.name = name.trim() || null as unknown as string;
+    this.commit();
+  }
+
+  /** Moves an item so it ends at stacking index `index` (0 = bottom), counted without the item itself. */
+  moveItem(item: paper.Item, index: number) {
+    const others = this.content.children.filter((c) => c !== item);
+    const target = Math.max(0, Math.min(others.length, index));
+    if (others[target - 1] === item.previousSibling && others[target] === item.nextSibling) return;
+    item.remove();
+    this.content.insertChild(target, item);
+    this.commit();
+  }
+
+  // ---------------------------------------------------------------- reference image
+
+  setReference(src: string | null) {
+    this.reference.src = src;
+    this.refLayer.removeChildren();
+    if (src) {
+      const raster = new paper.Raster({ source: src, parent: this.refLayer });
+      raster.onLoad = () => {
+        raster.fitBounds(new paper.Rectangle(0, 0, ART, ART));
+        this.applyReference();
+      };
+    }
+    this.applyReference();
+  }
+
+  setReferenceStyle(opacity: number, visible: boolean) {
+    this.reference.opacity = opacity;
+    this.reference.visible = visible;
+    this.applyReference();
+  }
+
+  private applyReference() {
+    this.refLayer.opacity = this.reference.opacity;
+    this.refLayer.visible = this.reference.visible && !!this.reference.src;
+    this.onReference();
+  }
+
+  onReference = () => {};
 
   // ---------------------------------------------------------------- view
 
@@ -830,9 +1077,13 @@ export class Editor {
       result = next;
     }
     base.parent.insertChild(base.index, result);
+    // Booleans copy applyMatrix from the bottom shape; text keeps its own matrix, shapes must not.
+    result.applyMatrix = true;
     result.data = { ...base.data };
     delete result.data.text;
-    if (base.data.fill?.type === 'linear') applyFill(result, base.data.fill);
+    delete result.data.rotation;
+    const baseFill = readFill(base);
+    if (baseFill.type === 'linear') applyFill(result, baseFill);
     items.forEach((i) => i.remove());
     this.select([result]);
     this.commit();
@@ -854,6 +1105,10 @@ export class Editor {
     for (const it of this.sorted()) {
       if (it instanceof paper.Group && !(it instanceof paper.Layer)) {
         const kids = it.removeChildren();
+        for (const k of kids) {
+          if (k.clipMask) k.remove();
+          else k.opacity *= it.opacity;
+        }
         it.parent.insertChildren(it.index, kids);
         it.remove();
         out.push(...kids.filter((k) => !k.clipMask));
@@ -930,9 +1185,17 @@ export class Editor {
 
   rotate(deg: number) {
     const b = this.selBounds();
-    if (!b) return;
-    this.selection.forEach((i) => i.rotate(deg, b.center));
+    if (!b || !deg) return;
+    this.selection.forEach((i) => {
+      i.rotate(deg, b.center);
+      i.data.rotation = (((i.data.rotation ?? 0) + deg) % 360 + 540) % 360 - 180;
+    });
     this.commit();
+  }
+
+  /** Rotation of the first selected item, as tracked by the rotate commands. */
+  get rotation(): number {
+    return Math.round((this.selection[0]?.data.rotation ?? 0) * 10) / 10;
   }
 
   flip(axis: 'h' | 'v') {
@@ -990,31 +1253,61 @@ export class Editor {
   }
 
   importSVG(svg: string) {
-    const item = paper.project.importSVG(svg, { expandShapes: true, insert: false }) as paper.Item | null;
+    let item = paper.project.importSVG(svg, { expandShapes: true, insert: false }) as paper.Item | null;
     if (!item) throw new Error('Could not read that SVG.');
     // Paper wraps the viewBox in a clip rectangle; drop it so ungrouping behaves.
-    item.getItems({ clipMask: true }).forEach((c) => c.remove());
-    if (item instanceof paper.Group) item.clipped = false;
-    this.content.addChild(item);
-    const b = item.bounds;
-    if (b.width > ART || b.height > ART || b.width === 0) {
-      const s = (ART * 0.8) / Math.max(b.width, b.height, 1);
-      item.scale(s);
+    if (item instanceof paper.Group && item.firstChild?.clipMask) {
+      item.firstChild.remove();
+      item.clipped = false;
     }
-    item.position = new paper.Point(ART / 2, ART / 2);
+    // Unwrap groups that hold a single shape, so Union and point editing work right away.
+    let unwrapped: paper.Item = item;
+    while (unwrapped instanceof paper.Group && unwrapped.children.length === 1) {
+      const only = unwrapped.firstChild;
+      only.transform(unwrapped.matrix);
+      unwrapped = only;
+    }
+    item = unwrapped;
+    const b = item.bounds;
+    if (!b.width && !b.height) throw new Error('That SVG has nothing to import.');
+    this.content.addChild(item);
+    // A full 1024 artboard (like one exported here) keeps its exact layout; anything else is fitted and centred.
+    const root = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement;
+    const vb = root.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
+    const isArtboard = vb ? vb[2] === ART && vb[3] === ART : root.getAttribute('width') === String(ART) && root.getAttribute('height') === String(ART);
+    if (!isArtboard) {
+      item.scale((ART * 0.6) / Math.max(b.width, b.height));
+      item.position = new paper.Point(ART / 2, ART / 2);
+    }
     this.setTool('select');
     this.select([item]);
     this.commit();
   }
 
-  /** Standalone SVG of the artboard: whole icon, background only, or foreground only. */
-  toSVG(part: 'full' | 'background' | 'foreground' = 'full'): string {
+  /**
+   * Standalone SVG of the artboard: whole icon, background only, or foreground only.
+   * 'background-bleed' is the background on a 1536 canvas with the artboard in the middle
+   * 1024, matching the 108 dp adaptive layer whose visible 72 dp is the artboard.
+   */
+  toSVG(part: 'full' | 'background' | 'background-bleed' | 'foreground' = 'full'): string {
     // Each export numbers its gradients from color-1, so prefix ids to keep the layers apart.
+    // Paper wraps exports that carry <defs> in a nested <svg>, whose viewport clips anything at
+    // negative coordinates (the bleed). Unwrap it so the parts sit directly in our root.
     const exported = (layer: paper.Layer, prefix: string) =>
       (layer.exportSVG({ asString: true }) as unknown as string)
+        .replace(/^<svg[^>]*>([\s\S]*)<\/svg>$/, '$1')
         .replace(/id="([^"]+)"/g, `id="${prefix}-$1"`)
         .replace(/url\(#([^)]+)\)/g, `url(#${prefix}-$1)`)
         .replace(/href="#([^"]+)"/g, `href="#${prefix}-$1"`);
+    if (part === 'background-bleed') {
+      const pad = ART / 4;
+      // Same paint, larger rectangle: the gradient keeps its artboard geometry and pads outwards.
+      const bleed = new paper.Path.Rectangle({ rectangle: new paper.Rectangle(-pad, -pad, ART + 2 * pad, ART + 2 * pad), insert: false });
+      bleed.fillColor = this.bgRect.fillColor ? this.bgRect.fillColor.clone() : null;
+      const holder = new paper.Layer({ insert: false, children: [bleed] });
+      const size = ART + 2 * pad;
+      return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${size}" height="${size}" viewBox="${-pad} ${-pad} ${size} ${size}">${exported(holder, 'bg')}</svg>`;
+    }
     const parts: string[] = [];
     if (part !== 'foreground' && this.background.enabled) parts.push(exported(this.bgLayer, 'bg'));
     if (part !== 'background') parts.push(exported(this.content, 'fg'));

@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { drawAdaptive, drawAdaptiveBg, drawAdaptiveFg, drawFull, ico, loadImages, png } from './render';
+import { drawAdaptive, drawAdaptiveBg, drawAdaptiveFg, drawForeground, drawFull, ico, loadImages, png, pngRGB, type IconSvgs } from './render';
 
 export interface ExportOptions {
   name: string;
@@ -8,6 +8,19 @@ export interface ExportOptions {
   web: boolean;
   /** Shown under the artboard when the icon has no background; iOS and stores need opaque art. */
   opaqueColor: string;
+  /** iOS 18 dark and tinted appearances. */
+  iosVariants?: boolean;
+  /** Extra square PNG sizes, written to png/. */
+  extraSizes?: number[];
+}
+
+/** Parses "64, 128 256" into valid sizes (16 to 4096 px), without duplicates. */
+export function parseSizes(text: string): number[] {
+  const sizes = text
+    .split(/[\s,;]+/)
+    .map((t) => Number(t.replace(/px$/i, '')))
+    .filter((n) => Number.isInteger(n) && n >= 16 && n <= 4096);
+  return [...new Set(sizes)].sort((a, b) => a - b);
 }
 
 const DENSITIES: [string, number][] = [
@@ -26,10 +39,16 @@ const ADAPTIVE_XML = `<?xml version="1.0" encoding="utf-8"?>
 </adaptive-icon>
 `;
 
-const IOS_CONTENTS = {
-  images: [{ filename: 'AppIcon-1024.png', idiom: 'universal', platform: 'ios', size: '1024x1024' }],
-  info: { author: 'iconprism', version: 1 },
-};
+function iosContents(variants: boolean) {
+  const base = { idiom: 'universal', platform: 'ios', size: '1024x1024' };
+  const images: Record<string, unknown>[] = [{ ...base, filename: 'AppIcon-1024.png' }];
+  if (variants)
+    images.push(
+      { ...base, filename: 'AppIcon-Dark-1024.png', appearances: [{ appearance: 'luminosity', value: 'dark' }] },
+      { ...base, filename: 'AppIcon-Tinted-1024.png', appearances: [{ appearance: 'luminosity', value: 'tinted' }] },
+    );
+  return { images, info: { author: 'iconprism', version: 1 } };
+}
 
 export function slug(name: string) {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'app';
@@ -51,6 +70,8 @@ function readme(o: ExportOptions) {
       '  Copy the folders in android/res into app/src/main/res (merge, overwrite).',
       '  Flutter: android/app/src/main/res',
       '  Upload android/play-store-512.png as the Play Store icon.',
+      '  Themed icons (Android 13+) tint the shape of ic_launcher_monochrome, so a',
+      '  large solid shape in the foreground shows as a solid block when themed.',
       '',
     );
   if (o.web)
@@ -63,7 +84,7 @@ function readme(o: ExportOptions) {
   return lines.join('\n');
 }
 
-export async function buildZip(svgs: { full: string; bg: string | null; fg: string }, o: ExportOptions): Promise<Blob> {
+export async function buildZip(svgs: IconSvgs, o: ExportOptions): Promise<Blob> {
   const imgs = await loadImages(svgs);
   const zip = new JSZip();
   const root = zip.folder(`${slug(o.name)}-icons`)!;
@@ -75,8 +96,13 @@ export async function buildZip(svgs: { full: string; bg: string | null; fg: stri
 
   if (o.ios) {
     const set = root.folder('ios/AppIcon.appiconset')!;
-    set.file('AppIcon-1024.png', await png(drawFull(imgs, 1024, 'none', opaque ?? '#000000')));
-    set.file('Contents.json', JSON.stringify(IOS_CONTENTS, null, 2));
+    set.file('AppIcon-1024.png', await pngRGB(drawFull(imgs, 1024, 'none', opaque ?? '#000000')));
+    if (o.iosVariants) {
+      // Dark: artwork on transparent, iOS draws its own dark backdrop. Tinted: greyscale on black.
+      set.file('AppIcon-Dark-1024.png', await png(drawForeground(imgs, 1024)));
+      set.file('AppIcon-Tinted-1024.png', await pngRGB(drawForeground(imgs, 1024, { grayscale: true, under: '#000000' })));
+    }
+    set.file('Contents.json', JSON.stringify(iosContents(!!o.iosVariants), null, 2));
   }
 
   if (o.android) {
@@ -134,6 +160,8 @@ export async function buildZip(svgs: { full: string; bg: string | null; fg: stri
       ].join('\n'),
     );
   }
+
+  for (const size of o.extraSizes ?? []) root.file(`png/icon-${size}.png`, await png(drawFull(imgs, size)));
 
   return zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
 }

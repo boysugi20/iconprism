@@ -1,7 +1,8 @@
 import './style.css';
 import paper from 'paper/dist/paper-core';
 import { Editor, isText, type Align, type BooleanOp, type Fill, type ToolName } from './editor';
-import { buildZip, slug } from './export';
+import { buildZip, parseSizes, slug } from './export';
+import { TEMPLATES } from './templates';
 import { drawAdaptive, drawFull, loadImages } from './render';
 import { hydrateIcons, icon } from './icons';
 import { addCustomFont, allFonts, fontInfo, loadFont, nearestWeight, WEIGHT_NAMES, type TextSpec } from './text';
@@ -172,17 +173,20 @@ async function openTextEditor(req: { item: paper.CompoundPath | null; at: paper.
   // A click outside while typing only finishes the current text.
   if (editing) { await commitText(); return; }
   const spec: TextSpec = req.item ? { ...req.item.data.text } : { ...editor.newText, content: '' };
-  editing = { item: req.item, at: req.item ? req.item.localToGlobal(new paper.Point(0, 0)) : req.at, spec };
-  if (req.item) req.item.visible = false;
+  const ed = { item: req.item, at: req.item ? req.item.localToGlobal(new paper.Point(0, 0)) : req.at, spec };
+  editing = ed;
+  editor.hideForEditing(req.item);
   editor.select([]);
   textEl.textContent = spec.content;
   try {
     await styleTextEditor();
   } catch (err) {
-    cancelText();
+    if (editing === ed) cancelText();
     toast((err as Error).message);
     return;
   }
+  // Another click may have finished or replaced this edit while the font loaded.
+  if (editing !== ed) return;
   textEl.hidden = false;
   textEl.focus();
   const range = document.createRange();
@@ -197,7 +201,7 @@ function closeTextEditor() {
   const ed = editing;
   editing = null;
   textEl.hidden = true;
-  if (ed?.item) ed.item.visible = true;
+  editor.hideForEditing(null);
   return ed;
 }
 
@@ -291,12 +295,33 @@ sHex.addEventListener('change', () => {
 sWidth.addEventListener('change', () => emitStroke(true));
 
 const geo = ['f-x', 'f-y', 'f-w', 'f-h'].map((id) => $<HTMLInputElement>(id));
-geo.forEach((input) =>
+const keepRatio = $<HTMLInputElement>('f-ratio');
+geo.forEach((input, i) =>
   input.addEventListener('change', () => {
-    const [x, y, w, h] = geo.map((g) => Number(g.value));
+    const b = editor.selBounds();
+    if (!b) return;
+    const v = Number(input.value);
+    if (input.value.trim() === '' || !Number.isFinite(v)) { syncPanel(); return; }
+    // Only the edited field changes; the others keep their exact (unrounded) values.
+    let [x, y, w, h] = [b.x, b.y, b.width, b.height];
+    if (i === 0) x = v;
+    if (i === 1) y = v;
+    if (i === 2) w = v;
+    if (i === 3) h = v;
+    // With Keep ratio on, typing one side scales the other to match.
+    if (keepRatio.checked && b.width && b.height) {
+      if (i === 2) h = (w / b.width) * b.height;
+      if (i === 3) w = (h / b.height) * b.width;
+    }
     editor.setBounds({ x, y, w, h });
   }),
 );
+const rot = $<HTMLInputElement>('f-rot');
+rot.addEventListener('change', () => {
+  const v = Number(rot.value);
+  if (Number.isFinite(v)) editor.rotate(v - editor.rotation);
+  syncPanel();
+});
 
 const opacity = $<HTMLInputElement>('f-opacity');
 opacity.addEventListener('input', () => editor.setOpacity(Number(opacity.value), false));
@@ -336,6 +361,8 @@ function syncPanel() {
     g.disabled = !b;
     if (document.activeElement !== g) g.value = b ? String(round([b.x, b.y, b.width, b.height][i])) : '';
   });
+  rot.disabled = !b;
+  if (document.activeElement !== rot) rot.value = b ? String(editor.rotation) : '';
 
   const st = editor.currentStyle();
   fill.set(st.fill);
@@ -351,6 +378,8 @@ function syncPanel() {
   bgFill.set(editor.background.fill);
   $<HTMLButtonElement>('undo').disabled = !editor.canUndo;
   $<HTMLButtonElement>('redo').disabled = !editor.canRedo;
+  $('empty').hidden = editor.layers().length > 0 || !!editing;
+  syncLayers();
 }
 
 // ---------------------------------------------------------------- previews
@@ -365,6 +394,7 @@ function svgs() {
   return {
     full: editor.toSVG('full'),
     bg: editor.background.enabled ? editor.toSVG('background') : null,
+    bgBleed: editor.background.enabled ? editor.toSVG('background-bleed') : null,
     fg: editor.toSVG('foreground'),
   };
 }
@@ -417,9 +447,7 @@ document.querySelector('.panel')!.addEventListener('click', (e) => {
 
 $('undo').addEventListener('click', () => editor.undo());
 $('redo').addEventListener('click', () => editor.redo());
-$('new').addEventListener('click', () => {
-  if (confirm('Start a new icon? This clears the artboard (Undo brings it back).')) editor.clearAll();
-});
+$('new').addEventListener('click', () => openTemplates(false));
 $('zoom-in').addEventListener('click', () => editor.zoomBy(1.25));
 $('zoom-out').addEventListener('click', () => editor.zoomBy(0.8));
 $('zoom-fit').addEventListener('click', () => editor.fit());
@@ -449,8 +477,13 @@ const appName = () => $<HTMLInputElement>('x-name').value || 'My App';
 
 $('dl-svg').addEventListener('click', () => download(new Blob([editor.toSVG()], { type: 'image/svg+xml' }), `${slug(appName())}-icon.svg`));
 $('dl-png').addEventListener('click', async () => {
-  const imgs = await loadImages(svgs());
-  drawFull(imgs, 1024).toBlob((b) => b && download(b, `${slug(appName())}-icon-1024.png`), 'image/png');
+  try {
+    const imgs = await loadImages(svgs());
+    drawFull(imgs, 1024).toBlob((b) => b && download(b, `${slug(appName())}-icon-1024.png`), 'image/png');
+  } catch (err) {
+    console.error(err);
+    toast('Could not render the PNG.');
+  }
 });
 
 // ---------------------------------------------------------------- export dialog
@@ -471,6 +504,8 @@ $('x-go').addEventListener('click', async (e) => {
     android: $<HTMLInputElement>('x-android').checked,
     web: $<HTMLInputElement>('x-web').checked,
     opaqueColor: '#ffffff',
+    iosVariants: $<HTMLInputElement>('x-ios-variants').checked,
+    extraSizes: parseSizes($<HTMLInputElement>('x-sizes').value),
   };
   if (!opts.ios && !opts.android && !opts.web) { toast('Pick at least one platform.'); return; }
   const btn = e.currentTarget as HTMLButtonElement;
@@ -489,6 +524,265 @@ $('x-go').addEventListener('click', async (e) => {
   }
 });
 
+$('x-copy-svg').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(editor.toSVG());
+    toast('SVG code copied.');
+  } catch {
+    toast('Copy failed. Use the SVG button to download it instead.');
+  }
+});
+
+// ---------------------------------------------------------------- templates
+
+const tplDialog = $<HTMLDialogElement>('template-dialog');
+$('templates').innerHTML = TEMPLATES.map(
+  (t) => `<button type="button" class="tpl" data-tpl="${t.id}"><svg viewBox="0 0 64 64" aria-hidden="true">${t.thumb}</svg><b>${t.name}</b><span>${t.hint}</span></button>`,
+).join('');
+$('templates').addEventListener('click', async (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-tpl]');
+  const t = TEMPLATES.find((x) => x.id === b?.dataset.tpl);
+  if (!t) return;
+  tplDialog.close();
+  if (editing) cancelText();
+  try {
+    await editor.applyTemplate(t);
+  } catch (err) {
+    toast((err as Error).message);
+  }
+});
+
+function openTemplates(welcome: boolean) {
+  $('tpl-title').textContent = welcome ? 'Welcome to iconprism' : 'Start a new icon';
+  $('tpl-sub').textContent = welcome
+    ? 'Draw an app icon, then export every size for iOS, Android and the web. Pick a starting point; you can change everything afterwards.'
+    : 'Pick a starting point. This replaces the artboard, and Undo brings back what you had.';
+  tplDialog.showModal();
+}
+$('empty-template').addEventListener('click', () => openTemplates(false));
+
+// ---------------------------------------------------------------- help + snap
+
+const helpDialog = $<HTMLDialogElement>('help-dialog');
+$('help').addEventListener('click', () => helpDialog.showModal());
+$('empty-help').addEventListener('click', () => helpDialog.showModal());
+window.addEventListener('keydown', (e) => {
+  const t = e.target as HTMLElement;
+  if (e.key === '?' && !t.closest('input, textarea, select, [contenteditable], dialog[open]')) helpDialog.showModal();
+});
+
+const snapBtn = $('snap');
+snapBtn.addEventListener('click', () => {
+  editor.snapOn = !editor.snapOn;
+  snapBtn.classList.toggle('on', editor.snapOn);
+  snapBtn.setAttribute('aria-pressed', String(editor.snapOn));
+});
+
+// ---------------------------------------------------------------- panel tabs + layers
+
+const layersEl = $('layers');
+let showingLayers = false;
+function setTab(layers: boolean) {
+  showingLayers = layers;
+  $('tab-design').classList.toggle('on', !layers);
+  $('tab-layers').classList.toggle('on', layers);
+  $('tab-design').setAttribute('aria-selected', String(!layers));
+  $('tab-layers').setAttribute('aria-selected', String(layers));
+  $('design-pane').hidden = layers;
+  $('layers-pane').hidden = !layers;
+  syncLayers();
+}
+$('tab-design').addEventListener('click', () => setTab(false));
+$('tab-layers').addEventListener('click', () => setTab(true));
+
+function layerName(item: paper.Item): string {
+  if (item.name) return item.name;
+  if (isText(item)) return `“${(item.data.text as TextSpec).content.split('\n')[0].slice(0, 24)}”`;
+  if (item instanceof paper.Group) return `Group (${item.children.length})`;
+  if (item instanceof paper.CompoundPath) return 'Compound shape';
+  if (item instanceof paper.Path) return item.closed ? 'Shape' : 'Line';
+  return item.className;
+}
+
+function layerKind(item: paper.Item) {
+  return isText(item) ? 'text' : item instanceof paper.Group ? 'group' : item instanceof paper.Path && !item.closed ? 'line' : 'shape';
+}
+
+const KIND_ICON: Record<string, string> = { text: 'text', group: 'node', line: 'line', shape: 'polygon' };
+const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+function syncLayers() {
+  const items = editor.layers();
+  $('layer-count').textContent = items.length ? String(items.length) : '';
+  if (!showingLayers || layersEl.querySelector('[contenteditable]')) return;
+  layersEl.innerHTML = items.length
+    ? items
+        .map(
+          (it) => `<li draggable="true" data-id="${it.id}" class="${editor.selection.includes(it) ? 'on' : ''} ${it.visible ? '' : 'off'} ${it.locked ? 'locked' : ''}">
+            <i class="kind">${icon(KIND_ICON[layerKind(it)])}</i>
+            <span class="name">${esc(layerName(it))}</span>
+            <button class="icon-btn mini" data-act="vis" title="${it.visible ? 'Hide' : 'Show'}">${icon(it.visible ? 'eye' : 'eyeOff')}</button>
+            <button class="icon-btn mini" data-act="lock" title="${it.locked ? 'Unlock' : 'Lock'}">${icon(it.locked ? 'lock' : 'unlock')}</button>
+          </li>`,
+        )
+        .join('')
+    : '<li class="none">No layers yet. Draw something on the artboard.</li>';
+}
+
+const itemById = (id: string | undefined) => editor.layers().find((i) => String(i.id) === id);
+
+layersEl.addEventListener('click', (e) => {
+  const el = e.target as HTMLElement;
+  const li = el.closest<HTMLLIElement>('li[data-id]');
+  const item = itemById(li?.dataset.id);
+  if (!item) return;
+  const act = el.closest<HTMLButtonElement>('[data-act]')?.dataset.act;
+  if (act === 'vis') return editor.setItemVisible(item, !item.visible);
+  if (act === 'lock') return editor.setItemLocked(item, !item.locked);
+  if (!item.visible || item.locked) { toast('Show and unlock this layer to select it.'); return; }
+  if (e.shiftKey) editor.select(editor.selection.includes(item) ? editor.selection.filter((i) => i !== item) : [...editor.selection, item]);
+  else editor.select([item]);
+});
+
+layersEl.addEventListener('dblclick', (e) => {
+  const name = (e.target as HTMLElement).closest<HTMLElement>('.name');
+  const li = name?.closest<HTMLLIElement>('li[data-id]');
+  const item = itemById(li?.dataset.id);
+  if (!name || !item) return;
+  name.contentEditable = 'plaintext-only';
+  name.focus();
+  getSelection()?.selectAllChildren(name);
+  const finish = (save: boolean) => {
+    name.removeAttribute('contenteditable');
+    if (save) editor.renameItem(item, name.textContent ?? '');
+    else syncLayers();
+  };
+  name.addEventListener('keydown', (k) => {
+    k.stopPropagation();
+    if (k.key === 'Enter') { k.preventDefault(); name.blur(); }
+    if (k.key === 'Escape') { name.dataset.cancel = '1'; name.blur(); }
+  });
+  name.addEventListener('blur', () => finish(!name.dataset.cancel), { once: true });
+});
+
+let dragId: string | null = null;
+layersEl.addEventListener('dragstart', (e) => {
+  dragId = (e.target as HTMLElement).closest<HTMLLIElement>('li[data-id]')?.dataset.id ?? null;
+  e.dataTransfer?.setData('text/plain', dragId ?? '');
+});
+layersEl.addEventListener('dragover', (e) => {
+  const li = (e.target as HTMLElement).closest<HTMLLIElement>('li[data-id]');
+  if (!li || !dragId) return;
+  e.preventDefault();
+  const r = li.getBoundingClientRect();
+  layersEl.querySelectorAll('.drop-above, .drop-below').forEach((x) => x.classList.remove('drop-above', 'drop-below'));
+  li.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-above' : 'drop-below');
+});
+layersEl.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const li = (e.target as HTMLElement).closest<HTMLLIElement>('li[data-id]');
+  const item = itemById(dragId ?? undefined);
+  const target = itemById(li?.dataset.id);
+  dragId = null;
+  if (!li || !item || !target || item === target) { syncLayers(); return; }
+  // The list shows the top of the stack first, so "above" in the list means higher in the stack.
+  const others = editor.layers().reverse().filter((i) => i !== item);
+  const t = others.indexOf(target);
+  editor.moveItem(item, li.classList.contains('drop-above') ? t + 1 : t);
+});
+layersEl.addEventListener('dragend', () => { dragId = null; syncLayers(); });
+
+// ---------------------------------------------------------------- reference image
+
+const REF_KEY = 'iconprism:ref';
+const refOpacity = $<HTMLInputElement>('ref-opacity');
+const refShow = $<HTMLInputElement>('ref-show');
+
+function syncReference() {
+  const has = !!editor.reference.src;
+  $('ref-empty').hidden = has;
+  $('ref-controls').hidden = !has;
+  refOpacity.value = String(editor.reference.opacity);
+  refShow.checked = editor.reference.visible;
+}
+
+function saveReference() {
+  try {
+    if (editor.reference.src) localStorage.setItem(REF_KEY, JSON.stringify(editor.reference));
+    else localStorage.removeItem(REF_KEY);
+  } catch {
+    toast('The reference image is too large to keep after a reload, but you can use it now.');
+  }
+}
+
+function readImage(file: File): Promise<string> {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result));
+    r.onerror = () => rej(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
+async function setReferenceFile(file: File | undefined) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { toast('Pick an image file (PNG, JPG, WebP, GIF or SVG).'); return; }
+  editor.setReference(await readImage(file));
+  saveReference();
+  toast('Reference added. It sits under your shapes and is never exported.');
+}
+
+editor.onReference = syncReference;
+for (const id of ['ref-file', 'ref-replace']) {
+  $<HTMLInputElement>(id).addEventListener('change', (e) => {
+    const input = e.target as HTMLInputElement;
+    setReferenceFile(input.files?.[0]);
+    input.value = '';
+  });
+}
+refOpacity.addEventListener('input', () => { editor.setReferenceStyle(Number(refOpacity.value), refShow.checked); });
+refOpacity.addEventListener('change', saveReference);
+refShow.addEventListener('change', () => { editor.setReferenceStyle(Number(refOpacity.value), refShow.checked); saveReference(); });
+$('ref-remove').addEventListener('click', () => { editor.setReference(null); saveReference(); });
+
+try {
+  const saved = JSON.parse(localStorage.getItem(REF_KEY) ?? 'null');
+  if (saved?.src) {
+    editor.setReferenceStyle(saved.opacity ?? 0.4, saved.visible ?? true);
+    editor.setReference(saved.src);
+  }
+} catch { /* ignore a broken saved reference */ }
+syncReference();
+
+// ---------------------------------------------------------------- drag and drop
+
+const drop = $('drop');
+let dragDepth = 0;
+const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
+window.addEventListener('dragenter', (e) => { if (hasFiles(e)) { dragDepth++; drop.hidden = false; } });
+window.addEventListener('dragleave', (e) => { if (hasFiles(e) && --dragDepth <= 0) { dragDepth = 0; drop.hidden = true; } });
+window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+window.addEventListener('drop', async (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  drop.hidden = true;
+  const file = e.dataTransfer?.files[0];
+  if (!file) return;
+  if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
+    try {
+      editor.importSVG(await file.text());
+      toast(`Imported ${file.name}`);
+    } catch (err) {
+      toast((err as Error).message);
+    }
+  } else if (/\.(ttf|otf|woff)$/i.test(file.name)) {
+    toast('To use a font, select the text tool and press Upload font.');
+  } else {
+    setReferenceFile(file);
+  }
+});
+
 // ---------------------------------------------------------------- wiring
 
 const zoomLabel = $('zoom-fit');
@@ -498,8 +792,11 @@ editor.onSelect = syncPanel;
 editor.onTool = () => { syncTool(); syncTextPanel(); };
 editor.onView = () => {
   zoomLabel.textContent = `${Math.round(paper.view.zoom * 100)}%`;
-  if (editing) styleTextEditor();
+  if (editing) styleTextEditor().catch((err) => toast(err.message));
 };
+editor.onBeforeHistory = () => { if (editing) cancelText(); };
+// Clicking the canvas while typing finishes the text first.
+canvas.addEventListener('pointerdown', () => { if (editing && !textEl.hidden) commitText(); }, true);
 editor.onEditText = (req) => { openTextEditor(req); };
 editor.onNotice = toast;
 
@@ -513,5 +810,6 @@ new ResizeObserver(([entry]) => {
 syncTool();
 syncPanel();
 renderPreviews();
+if (!editor.hadSavedDoc) openTemplates(true);
 
 if (import.meta.env.DEV) Object.assign(window, { editor, paper, buildZip, svgs });

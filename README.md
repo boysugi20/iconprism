@@ -8,14 +8,24 @@ Free, open source, and it runs entirely in your browser. Nothing is uploaded.
 
 ## What it does
 
+**New to icon design?** Start from a template, then follow the built-in help (press `?`). Shapes snap to the centre and edges of the artboard and to each other, and dashed guides show what phones will crop.
+
+**Know your way around vector tools?** Edit points and curve handles, combine shapes with boolean operations, manage layers, type exact positions and sizes, and export iOS 18 dark and tinted icons or any extra PNG sizes.
+
+### Features
+
 - **Draw:** rectangle (with corner radius), ellipse, polygon, star, line and pen (curves) on a 1024 × 1024 artboard.
 - **Text:** type directly on the canvas in 13 bundled fonts or your own .ttf/.otf/.woff, with weight, size, alignment, letter spacing and line height. Text is stored as vector outlines, so it exports exactly, works with Union and Subtract, and stays editable (double-click it).
 - **Edit:** move, resize with handles, rotate, flip, align, reorder, group, and drag individual points and curve handles.
 - **Combine:** union (merge), subtract, intersect and exclude.
 - **Style:** solid or gradient fills, strokes, opacity, and a solid or gradient background.
+- **Templates:** six starting points, from blank to a monogram or a chat bubble.
+- **Snapping:** to the artboard's edges and centre and to other shapes. Hold ⌘ or Ctrl to skip it, or switch it off in the top bar.
+- **Layers:** select, rename, reorder by dragging, hide and lock.
+- **Reference image:** put a picture under your shapes to trace over. Fade it, hide it or replace it. It is never exported.
 - **Guides:** iOS mask outline, Android safe zone and centre lines.
 - **Preview:** live iOS, Android and favicon previews while you draw.
-- **Import and export SVG,** plus a 1024 px PNG.
+- **Import and export SVG** (drag and drop works too), plus a 1024 px PNG and a Copy SVG code button.
 - **Export icon set:** one ZIP with everything below.
 
 Your work is saved in the browser automatically.
@@ -24,9 +34,11 @@ Your work is saved in the browser automatically.
 
 | Platform | Files |
 | --- | --- |
-| iOS | `AppIcon.appiconset` with a 1024 px icon and `Contents.json` (Xcode 14+ builds the other sizes) |
+| iOS | `AppIcon.appiconset` with a 1024 px icon (saved without an alpha channel, as App Store Connect requires) and `Contents.json`; Xcode 14+ builds the other sizes. Optional iOS 18 dark and tinted icons. |
 | Android | `mipmap-mdpi` to `mipmap-xxxhdpi`: legacy, round, adaptive foreground, background and monochrome layers; `mipmap-anydpi-v26` XML; Play Store 512 px |
 | Web | `favicon.ico` (16/32/48), `favicon.svg`, `apple-touch-icon.png`, 192/512 PNGs, a maskable icon, `manifest.webmanifest` and a `<head>` snippet |
+
+Under **More options** you can also add any extra square PNG sizes.
 
 Install steps for each platform, including Flutter paths, are in the ZIP's `README.txt`.
 
@@ -53,6 +65,7 @@ Install steps for each platform, including Flutter paths, are in the ZIP's `READ
 | Space + drag, scroll | Pan |
 | ⌘ + scroll, pinch | Zoom |
 | ⇧1, ⌘0 | Fit artboard |
+| ? | Help and all shortcuts |
 
 Use Ctrl in place of ⌘ on Windows and Linux.
 
@@ -63,7 +76,7 @@ npm install
 npm run dev
 ```
 
-`npm run build` writes a static site to `dist/`. Pushing to `main` deploys it to GitHub Pages through `.github/workflows/pages.yml`.
+`npm test` runs the unit tests. `npm run build` writes a static site to `dist/`. Pushing to `main` deploys it to GitHub Pages through `.github/workflows/pages.yml`.
 
 Built with [Paper.js](http://paperjs.org) for vector editing and boolean operations, [opentype.js](https://opentype.js.org) for turning text into outlines, and [JSZip](https://stuk.github.io/jszip/) for the export. Bundled fonts come from [Fontsource](https://fontsource.org) under the SIL Open Font License.
 
