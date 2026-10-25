@@ -1,0 +1,41 @@
+/** 24 px line icons. Paths only; the wrapper adds stroke styling. */
+const P: Record<string, string> = {
+  select: '<path d="M6 3l13 7.5-5.6 1.6L10.8 18z" fill="currentColor" stroke="none"/>',
+  node: '<path d="M6 18L10 6l8 8z"/><rect x="4" y="16" width="4" height="4" fill="currentColor"/><rect x="8" y="4" width="4" height="4" fill="#0d0d0d"/><rect x="16" y="12" width="4" height="4" fill="#0d0d0d"/>',
+  rect: '<rect x="4" y="5" width="16" height="14"/>',
+  ellipse: '<circle cx="12" cy="12" r="8"/>',
+  polygon: '<path d="M12 3.5l7.4 4.25v8.5L12 20.5l-7.4-4.25v-8.5z"/>',
+  star: '<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1.1 5.8L12 16.8l-5.3 2.8 1.1-5.8-4.3-4.1 5.9-.8z"/>',
+  line: '<path d="M5 19L19 5"/>',
+  pen: '<path d="M12 3l5.5 9L12 21l-5.5-9z"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><path d="M12 3v7.4"/>',
+  text: '<path d="M5 7V4h14v3M12 4v16M8.5 20h7"/>',
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/>',
+  redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 000 12h3"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  minus: '<path d="M5 12h14"/>',
+  rotateCcw: '<path d="M3 4v6h6"/><path d="M3.5 15a9 9 0 102.1-9.4L3 10"/>',
+  rotateCw: '<path d="M21 4v6h-6"/><path d="M20.5 15a9 9 0 11-2.1-9.4L21 10"/>',
+  flipH: '<path d="M12 3v18"/><path d="M9 7L3 17h6z"/><path d="M15 7l6 10h-6z" fill="currentColor"/>',
+  flipV: '<path d="M3 12h18"/><path d="M7 9L17 3v6z"/><path d="M7 15l10 6v-6z" fill="currentColor"/>',
+  unite: '<path d="M4 4h10v6h6v10H10v-6H4z" fill="currentColor"/>',
+  subtract: '<path d="M4 4h10v6h-4v4H4z" fill="currentColor"/><rect x="10" y="10" width="10" height="10" stroke-dasharray="2 2"/>',
+  intersect: '<rect x="4" y="4" width="10" height="10" stroke-dasharray="2 2"/><rect x="10" y="10" width="10" height="10" stroke-dasharray="2 2"/><rect x="10" y="10" width="4" height="4" fill="currentColor"/>',
+  exclude: '<path d="M4 4h10v6h6v10H10v-6H4zM10 10v4h4v-4z" fill="currentColor" fill-rule="evenodd"/>',
+  alignLeft: '<path d="M4 3v18"/><rect x="7" y="6" width="12" height="4"/><rect x="7" y="14" width="7" height="4"/>',
+  alignH: '<path d="M12 3v18"/><rect x="5" y="6" width="14" height="4"/><rect x="8" y="14" width="8" height="4"/>',
+  alignRight: '<path d="M20 3v18"/><rect x="5" y="6" width="12" height="4"/><rect x="10" y="14" width="7" height="4"/>',
+  alignTop: '<path d="M3 4h18"/><rect x="6" y="7" width="4" height="12"/><rect x="14" y="7" width="4" height="7"/>',
+  alignV: '<path d="M3 12h18"/><rect x="6" y="5" width="4" height="14"/><rect x="14" y="8" width="4" height="8"/>',
+  alignBottom: '<path d="M3 20h18"/><rect x="6" y="5" width="4" height="12"/><rect x="14" y="10" width="4" height="7"/>',
+};
+
+export function icon(name: string): string {
+  return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] ?? ''}</svg>`;
+}
+
+/** Fills every element carrying data-icon="name". */
+export function hydrateIcons(root: ParentNode = document) {
+  root.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => {
+    el.innerHTML = icon(el.dataset.icon!) + el.innerHTML;
+  });
+}

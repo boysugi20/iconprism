@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>iconprism · app icon editor</title>
+    <meta name="description" content="Draw an app icon with simple vector tools, then export every iOS, Android and web size in one ZIP. Free, open source, runs in your browser." />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <header class="bar">
+      <a class="brand" href="https://github.com/boysugi20/iconprism" target="_blank" rel="noopener">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 8 58 54H6z" fill="currentColor" /><path d="M32 8 41 54H23z" fill="#0d0d0d" opacity=".2" /></svg>
+        <span>iconprism</span>
+      </a>
+      <div class="bar-group">
+        <button id="undo" class="icon-btn" title="Undo (⌘Z)" data-icon="undo"></button>
+        <button id="redo" class="icon-btn" title="Redo (⇧⌘Z)" data-icon="redo"></button>
+        <span class="sep"></span>
+        <button id="new" class="btn ghost">New</button>
+        <label class="btn ghost">Import SVG<input id="import" type="file" accept=".svg,image/svg+xml" hidden /></label>
+        <button id="dl-svg" class="btn ghost">SVG</button>
+        <button id="dl-png" class="btn ghost">PNG 1024</button>
+      </div>
+      <div class="bar-group right">
+        <button id="zoom-out" class="icon-btn" title="Zoom out (⌘−)" data-icon="minus"></button>
+        <button id="zoom-fit" class="zoom" title="Fit (⇧1)">100%</button>
+        <button id="zoom-in" class="icon-btn" title="Zoom in (⌘+)" data-icon="plus"></button>
+        <button id="export" class="btn primary">Export icon set</button>
+      </div>
+    </header>
+
+    <main class="app">
+      <nav class="tools" id="tools" aria-label="Tools"></nav>
+
+      <section class="stage" id="stage">
+        <canvas id="canvas"></canvas>
+        <div class="hint" id="hint"></div>
+      </section>
+
+      <aside class="panel">
+        <section class="block" id="sel-block">
+          <h2><span id="sel-title">Nothing selected</span></h2>
+          <div class="grid4">
+            <label class="num"><span>X</span><input id="f-x" type="number" /></label>
+            <label class="num"><span>Y</span><input id="f-y" type="number" /></label>
+            <label class="num"><span>W</span><input id="f-w" type="number" min="1" /></label>
+            <label class="num"><span>H</span><input id="f-h" type="number" min="1" /></label>
+          </div>
+          <div class="row">
+            <button class="icon-btn" data-cmd="rotate-ccw" title="Rotate −15°" data-icon="rotateCcw"></button>
+            <button class="icon-btn" data-cmd="rotate-cw" title="Rotate +15°" data-icon="rotateCw"></button>
+            <button class="icon-btn" data-cmd="flip-h" title="Flip horizontal" data-icon="flipH"></button>
+            <button class="icon-btn" data-cmd="flip-v" title="Flip vertical" data-icon="flipV"></button>
+            <label class="opacity" title="Opacity"><span>Opacity</span><input id="f-opacity" type="range" min="0" max="1" step="0.01" /></label>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2>Fill <small id="fill-scope">new shapes</small></h2>
+          <div id="fill"></div>
+        </section>
+
+        <section class="block">
+          <h2>Stroke</h2>
+          <div class="row">
+            <label class="check"><input id="s-on" type="checkbox" /><span>On</span></label>
+            <span class="color"><input id="s-color" type="color" /><input id="s-hex" class="hex" spellcheck="false" maxlength="7" /></span>
+            <label class="num small"><span>W</span><input id="s-width" type="number" min="0" /></label>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2>Combine <small>2+ shapes</small></h2>
+          <div class="ops">
+            <button data-cmd="unite" title="Union: merge into one shape"><i data-icon="unite"></i>Union</button>
+            <button data-cmd="subtract" title="Subtract the upper shapes from the bottom one"><i data-icon="subtract"></i>Subtract</button>
+            <button data-cmd="intersect" title="Keep only the overlap"><i data-icon="intersect"></i>Intersect</button>
+            <button data-cmd="exclude" title="Remove the overlap"><i data-icon="exclude"></i>Exclude</button>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2>Arrange</h2>
+          <div class="row">
+            <button class="icon-btn" data-cmd="align-left" title="Align left" data-icon="alignLeft"></button>
+            <button class="icon-btn" data-cmd="align-hcenter" title="Align centre" data-icon="alignH"></button>
+            <button class="icon-btn" data-cmd="align-right" title="Align right" data-icon="alignRight"></button>
+            <button class="icon-btn" data-cmd="align-top" title="Align top" data-icon="alignTop"></button>
+            <button class="icon-btn" data-cmd="align-vcenter" title="Align middle" data-icon="alignV"></button>
+            <button class="icon-btn" data-cmd="align-bottom" title="Align bottom" data-icon="alignBottom"></button>
+          </div>
+          <div class="row wrap">
+            <button class="btn small" data-cmd="front" title="Bring to front">Front</button>
+            <button class="btn small" data-cmd="forward" title="Bring forward">Forward</button>
+            <button class="btn small" data-cmd="backward" title="Send backward">Backward</button>
+            <button class="btn small" data-cmd="back" title="Send to back">Back</button>
+          </div>
+          <div class="row wrap">
+            <button class="btn small" data-cmd="group" title="Group (⌘G)">Group</button>
+            <button class="btn small" data-cmd="ungroup" title="Ungroup (⇧⌘G)">Ungroup</button>
+            <button class="btn small" data-cmd="duplicate" title="Duplicate (⌘D)">Duplicate</button>
+            <button class="btn small danger" data-cmd="delete" title="Delete (⌫)">Delete</button>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2>Shape tools</h2>
+          <div class="grid2">
+            <label class="num"><span>Radius</span><input id="d-radius" type="number" min="0" title="Corner radius for new rectangles" /></label>
+            <label class="num"><span>Sides</span><input id="d-sides" type="number" min="3" max="64" title="Sides for polygons, points for stars" /></label>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2>Background</h2>
+          <label class="check"><input id="bg-on" type="checkbox" /><span>Fill the artboard</span></label>
+          <div id="bg-fill"></div>
+          <h3>Guides</h3>
+          <div class="row wrap">
+            <label class="check"><input id="g-ios" type="checkbox" /><span>iOS mask</span></label>
+            <label class="check"><input id="g-android" type="checkbox" /><span>Android safe zone</span></label>
+            <label class="check"><input id="g-center" type="checkbox" /><span>Centre</span></label>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2>Preview</h2>
+          <div class="previews">
+            <figure><canvas id="pv-ios" width="128" height="128"></canvas><figcaption>iOS</figcaption></figure>
+            <figure><canvas id="pv-and" width="128" height="128"></canvas><figcaption>Android</figcaption></figure>
+            <figure><canvas id="pv-round" width="128" height="128"></canvas><figcaption>Round</figcaption></figure>
+            <figure class="tiny"><span><canvas id="pv-32" width="32" height="32"></canvas><canvas id="pv-16" width="16" height="16"></canvas></span><figcaption>Favicon</figcaption></figure>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <dialog id="export-dialog">
+      <form method="dialog">
+        <h2>Export icon set</h2>
+        <p class="muted">One ZIP with every size, ready to drop into your project.</p>
+        <label class="field"><span>App name</span><input id="x-name" value="My App" /></label>
+        <label class="check big"><input id="x-ios" type="checkbox" checked /><span><b>iOS</b> AppIcon.appiconset for Xcode</span></label>
+        <label class="check big"><input id="x-android" type="checkbox" checked /><span><b>Android</b> mipmaps, adaptive layers, Play Store 512</span></label>
+        <label class="check big"><input id="x-web" type="checkbox" checked /><span><b>Web</b> favicon.ico, PWA icons, manifest</span></label>
+        <p class="muted" id="x-note"></p>
+        <div class="actions">
+          <button value="cancel" class="btn ghost">Cancel</button>
+          <button id="x-go" value="default" class="btn primary">Download ZIP</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
