@@ -694,6 +694,7 @@ kbd {
 #ai-prompt:focus { outline: none; border-color: var(--accent); }
 .ai-go-row .btn.primary, .ai-go-row .btn { margin-left: 0; min-width: 120px; }
 .ai-result { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: start; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.ai-preview { width: 200px; height: 200px; }
 .ai-result img { width: 200px; height: 200px; border-radius: 44px; background: repeating-conic-gradient(#e8e8e8 0 25%, #fff 0 50%) 0 0 / 20px 20px; }
 .ai-result-side { display: grid; gap: 8px; justify-items: start; }
 .ai-result-side .btn.primary { margin-left: 0; }

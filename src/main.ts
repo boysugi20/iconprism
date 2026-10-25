@@ -996,9 +996,14 @@ async function runAi() {
     const svg = extractSvg(reply);
     if (!svg) throw new Error('The model answered without an SVG. Try again, or pick a stronger model in AI settings.');
     aiResult = sanitizeSvg(svg);
-    const img = $<HTMLImageElement>('ai-preview');
-    URL.revokeObjectURL(img.src);
+    // Shown through <img> so nothing in the SVG can run, even after sanitising.
+    const holder = $('ai-preview');
+    const old = holder.querySelector('img');
+    if (old) URL.revokeObjectURL(old.src);
+    const img = new Image();
+    img.alt = '';
     img.src = URL.createObjectURL(new Blob([aiResult], { type: 'image/svg+xml' }));
+    holder.replaceChildren(img);
     $('ai-result').hidden = false;
     $('ai-add').hidden = aiMode === 'edit';
     aiStatus.textContent = `Done in ${Math.round((Date.now() - started) / 1000)} s.`;
