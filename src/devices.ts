@@ -1,3 +1,14 @@
+import iosLight from './assets/wallpapers/ios-light.jpg';
+import iosDark from './assets/wallpapers/ios-dark.jpg';
+import androidLight from './assets/wallpapers/android-light.jpg';
+import androidDark from './assets/wallpapers/android-dark.jpg';
+
+/** Wallpapers generated for these mock-ups (FLUX 3 Image Klein via OpenRouter). */
+const WALLPAPERS = {
+  iphone: { light: iosLight, dark: iosDark },
+  android: { light: androidLight, dark: androidDark },
+};
+
 /** Mock-ups that show the icon where people will meet it: home screens, a browser tab, store listings, a notification. */
 
 export interface PreviewImages {
@@ -13,6 +24,7 @@ export interface PreviewImages {
 }
 
 export type DeviceView = 'iphone' | 'android' | 'web' | 'stores';
+export type Theme = 'light' | 'dark';
 
 const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
@@ -33,17 +45,17 @@ function statusBar(time = '9:41') {
   return `<div class="dv-status"><b>${time}</b><span class="dv-status-icons"><i></i><i></i><i class="batt"></i></span></div>`;
 }
 
-function iphone(p: PreviewImages, name: string) {
+function iphone(p: PreviewImages, name: string, theme: Theme) {
   const grid = [];
   for (let i = 0; i < 16; i++) grid.push(i === 5 ? mine(p.ios, name, 'sq-ios', 58) : filler(i, 'sq-ios', 58));
   const dock = [filler(9, 'sq-ios', 58), mine(p.ios, name, 'sq-ios', 58), filler(4, 'sq-ios', 58), filler(1, 'sq-ios', 58)].join('').replace(/<span class="dv-label">[^<]*<\/span>/g, '');
-  return `<div class="dv-phone dv-iphone"><div class="dv-screen">${statusBar()}<div class="dv-grid">${grid.join('')}</div><div class="dv-dock">${dock}</div></div></div>`;
+  return `<div class="dv-phone dv-iphone"><div class="dv-screen" style="background-image:url(${WALLPAPERS.iphone[theme]})">${statusBar()}<div class="dv-grid">${grid.join('')}</div><div class="dv-dock">${dock}</div></div></div>`;
 }
 
-function android(p: PreviewImages, name: string) {
+function android(p: PreviewImages, name: string, theme: Theme) {
   const grid = [];
   for (let i = 0; i < 12; i++) grid.push(i === 6 ? mine(p.circle, name, 'sq-circle', 54) : filler(i + 3, 'sq-circle', 54));
-  return `<div class="dv-phone dv-android"><div class="dv-screen">${statusBar('12:30')}<div class="dv-clock">12:30<small>Monday, 14 April</small></div><div class="dv-grid dv-grid-a">${grid.join('')}</div><div class="dv-search"></div></div></div>`;
+  return `<div class="dv-phone dv-android"><div class="dv-screen" style="background-image:url(${WALLPAPERS.android[theme]})">${statusBar('12:30')}<div class="dv-clock">12:30<small>Monday, 14 April</small></div><div class="dv-grid dv-grid-a">${grid.join('')}</div><div class="dv-search"></div></div></div>`;
 }
 
 function shapes(p: PreviewImages) {
@@ -80,13 +92,13 @@ function stores(p: PreviewImages, name: string) {
   </div>`;
 }
 
-export function deviceHtml(view: DeviceView, p: PreviewImages, name: string): string {
+export function deviceHtml(view: DeviceView, p: PreviewImages, name: string, theme: Theme): string {
   const n = name.trim() || 'My App';
   switch (view) {
     case 'iphone':
-      return `<div class="dv-row">${iphone(p, n)}</div>`;
+      return `<div class="dv-row">${iphone(p, n, theme)}</div>`;
     case 'android':
-      return `<div class="dv-row">${android(p, n)}${shapes(p)}</div>`;
+      return `<div class="dv-row">${android(p, n, theme)}${shapes(p)}</div>`;
     case 'web':
       return `<div class="dv-col">${web(p, n)}</div>`;
     case 'stores':

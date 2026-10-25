@@ -444,7 +444,7 @@ async function renderDevices(imgs?: IconImages) {
   $('device-theme').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.v === deviceTheme));
   const stage = $('device-stage');
   stage.dataset.theme = deviceTheme;
-  stage.innerHTML = deviceHtml(deviceView, previewImages(imgs ?? (await loadImages(svgs()))), deviceName.value);
+  stage.innerHTML = deviceHtml(deviceView, previewImages(imgs ?? (await loadImages(svgs()))), deviceName.value, deviceTheme);
 }
 
 function openDevices() {

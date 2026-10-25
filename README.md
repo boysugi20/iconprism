@@ -88,7 +88,7 @@ npm run dev
 
 `npm test` runs the unit tests. `npm run build` writes a static site to `dist/`. Pushing to `main` deploys it to GitHub Pages through `.github/workflows/pages.yml`.
 
-Built with [Paper.js](http://paperjs.org) for vector editing and boolean operations, [opentype.js](https://opentype.js.org) for turning text into outlines, and [JSZip](https://stuk.github.io/jszip/) for the export. Bundled fonts come from [Fontsource](https://fontsource.org) under the SIL Open Font License. Icons are [Phosphor Icons](https://github.com/phosphor-icons/core), MIT licensed (© 2023 Phosphor Icons).
+Built with [Paper.js](http://paperjs.org) for vector editing and boolean operations, [opentype.js](https://opentype.js.org) for turning text into outlines, and [JSZip](https://stuk.github.io/jszip/) for the export. Bundled fonts come from [Fontsource](https://fontsource.org) under the SIL Open Font License. Icons are [Phosphor Icons](https://github.com/phosphor-icons/core), MIT licensed (© 2023 Phosphor Icons). The phone wallpapers in the device preview were generated for this project with FLUX 3 Image Klein (Black Forest Labs) via OpenRouter.
 
 ## License
 
