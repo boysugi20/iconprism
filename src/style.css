@@ -141,7 +141,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 
 .stage { position: relative; overflow: hidden; background: var(--bg); }
-.stage canvas { position: absolute; inset: 0; display: block; }
+#canvas { position: absolute; inset: 0; display: block; }
 .hint {
   position: absolute;
   left: 50%;
@@ -712,16 +712,19 @@ kbd {
 .bar-group { min-width: 0; }
 
 /* Medium screens: the busiest buttons drop their labels; tooltips still name them. */
-@media (max-width: 1279px) {
-  #icons-btn .lbl, #ref-btn .lbl, .bar label.with-icon .lbl, #snap .lbl, #new .lbl { display: none; }
+@media (max-width: 1439px) {
+  #icons-btn .lbl, #ref-btn .lbl, .bar label.with-icon .lbl, #snap .lbl, #new .lbl, #preview-btn .lbl { display: none; }
   .bar .btn.with-icon, #snap { padding: 0 9px; }
 }
-/* Narrow laptops and tablets: icons only. */
+/* Narrow laptops and tablets: icons only, and zoom keeps just its percentage (⌘ + scroll still zooms). */
 @media (max-width: 1000px) {
   .bar .lbl { display: none; }
   .bar .lbl-long { display: none; }
   .bar .lbl-short { display: inline; }
   .bar .sep { margin: 0 2px; }
+  .brand-name { display: none; }
+  #zoom-in, #zoom-out { display: none; }
+  .bar .btn.with-icon, #snap { padding: 0 8px; }
 }
 /* Phones: the actions move into one menu. */
 @media (max-width: 700px) {
@@ -757,8 +760,12 @@ kbd {
 .mini-preview canvas { width: 40px; height: 40px; }
 .mini-preview #mini-fav { width: 16px; height: 16px; image-rendering: pixelated; }
 .hint { max-width: calc(100% - 420px); }
-@media (max-width: 1100px) { .hint { display: none; } }
-@media (max-width: 700px) { .mini-preview span { display: none; } .mini-preview canvas { width: 32px; height: 32px; } }
+@media (max-width: 1100px) {
+  .hint { display: none; }
+  .mini-preview { gap: 6px; padding: 6px; }
+  .mini-preview span, .mini-preview #mini-fav { display: none; }
+  .mini-preview canvas { width: 32px; height: 32px; }
+}
 
 /* ---------------------------------------------------------------- device preview */
 
@@ -867,3 +874,11 @@ kbd {
   .device-stage { padding: 14px; }
   .dv-phone { transform: scale(0.82); transform-origin: top center; margin-bottom: -110px; }
 }
+
+/* Top bar: one height, steady spacing, nothing shrinks below its content. */
+.bar > * { flex: none; }
+.bar-group { gap: 2px; }
+.bar-group.right { margin-left: auto; gap: 4px; }
+.bar .btn.with-icon { gap: 6px; }
+#snap { height: 32px; }
+.mini-preview canvas { display: block; flex: none; }
