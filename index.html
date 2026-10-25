@@ -21,6 +21,7 @@
         <button id="redo" class="icon-btn" title="Redo (⇧⌘Z)" data-icon="redo"></button>
         <span class="sep"></span>
         <button id="new" class="btn ghost" title="Start over from a template">New icon</button>
+        <button class="btn ghost with-icon" id="icons-btn" title="Pick from 1,500 ready-made icons and customise it"><i data-icon="sparkle"></i>Add icon</button>
         <label class="btn ghost with-icon" title="Add the shapes from an .svg file to the artboard, ready to edit"><i data-icon="shapes"></i>Import SVG<input id="import" type="file" accept=".svg,image/svg+xml" hidden /></label>
         <div class="menu-wrap">
           <button class="btn ghost with-icon" id="ref-btn" aria-haspopup="menu" aria-expanded="false" title="Put a picture under your shapes to trace over. It is never exported."><i data-icon="image"></i>Reference image<span class="dot" hidden></span></button>
@@ -67,9 +68,10 @@
           <p><b>Your artboard is empty.</b> Pick a tool on the left and drag on the artboard, or start from a ready-made icon.</p>
           <div class="row">
             <button class="btn primary" id="empty-template">Choose a template</button>
+            <button class="btn" id="empty-icons">Add an icon</button>
             <button class="btn" id="empty-help">How it works</button>
           </div>
-          <p class="muted small">Tracing a sketch or logo? Use <b>Reference image</b> in the top bar, or drop the picture here.</p>
+          <p class="muted small">Templates are finished icons you can recolour and edit. Tracing a sketch or logo? Use <b>Reference image</b> in the top bar, or drop the picture here.</p>
         </div>
         <div class="drop" id="drop" hidden><span>Drop an SVG to import it, or an image to trace over</span></div>
         <div class="hint" id="hint"></div>
@@ -231,8 +233,30 @@
       <form method="dialog">
         <h2 id="tpl-title">Start a new icon</h2>
         <p class="muted" id="tpl-sub">Pick a starting point. You can change everything afterwards, and Undo brings back what you had.</p>
-        <div class="templates" id="templates"></div>
+        <div class="tpl-body">
+          <h3>Ready-made icons</h3>
+          <div class="templates" id="templates-ready"></div>
+          <h3>Simple starting points</h3>
+          <div class="templates" id="templates-basic"></div>
+        </div>
         <div class="actions"><button value="cancel" class="btn ghost">Cancel</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="icons-dialog" class="wide icons-dialog">
+      <form method="dialog">
+        <div class="icons-head">
+          <h2>Add an icon</h2>
+          <span class="color" title="Icon colour"><input type="color" id="icon-color" value="#ffffff" /><input class="hex" id="icon-hex" value="#FFFFFF" spellcheck="false" maxlength="7" /></span>
+        </div>
+        <input id="icon-search" class="search" type="search" placeholder="Search 1,500 icons: heart, money, camera, chat…" autocomplete="off" />
+        <div class="row wrap">
+          <div class="seg" id="icon-weight"></div>
+        </div>
+        <div class="chips" id="icon-cats"></div>
+        <div class="icon-grid" id="icon-grid" role="listbox" aria-label="Icons"></div>
+        <p class="muted small">Click an icon to add it in the middle of the artboard. Shift+click adds it and keeps this open. Icons are filled shapes, so you can recolour them, combine them with Union or Subtract, and edit their points. Icons by <a href="https://phosphoricons.com" target="_blank" rel="noopener">Phosphor</a> (MIT).</p>
+        <div class="actions"><button value="cancel" class="btn ghost">Close</button></div>
       </form>
     </dialog>
 

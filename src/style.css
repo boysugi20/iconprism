@@ -590,3 +590,65 @@ kbd {
 .btn .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 2px; }
 .ref-menu { width: 280px; padding: 12px; gap: 10px; }
 .ref-menu .btn.small { flex: 1; }
+
+/* ---------------------------------------------------------------- icon library */
+
+.icons-dialog { width: min(820px, calc(100vw - 32px)); }
+.icons-dialog form { max-height: min(86vh, 820px); grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto; }
+.icons-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.icons-head .color { flex: none; width: 140px; }
+.search {
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 14px;
+}
+.search:focus { outline: none; border-color: var(--accent); }
+#icon-weight { grid-template-columns: repeat(4, auto); }
+#icon-weight button { padding: 0 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: transparent;
+  color: #cfcfcf;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.chip:hover { color: var(--text); border-color: #555; }
+.chip.on { background: var(--text); border-color: var(--text); color: var(--bg); }
+.icon-grid {
+  min-height: 240px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+  align-content: start;
+  padding: 2px;
+  color: #ffffff;
+}
+.icon-grid.loading { opacity: 0.5; }
+.ic {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 12px 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: inherit;
+}
+.ic:hover { border-color: var(--accent); background: var(--raised); }
+.ic svg { width: 32px; height: 32px; }
+.ic span { width: 100%; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.more-icons { grid-column: 1 / -1; height: 36px; border: 1px dashed var(--line-strong); border-radius: 6px; background: transparent; color: #cfcfcf; }
+.icons-dialog a { color: var(--text); }
+
+.tpl-body { max-height: min(62vh, 620px); overflow-y: auto; display: grid; gap: 10px; padding-right: 4px; }
+#template-dialog { width: min(760px, calc(100vw - 32px)); }
+#template-dialog .templates { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 640px) { #template-dialog .templates { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

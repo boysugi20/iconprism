@@ -2,7 +2,8 @@ import './style.css';
 import paper from 'paper/dist/paper-core';
 import { Editor, isText, type Align, type BooleanOp, type Fill, type ToolName } from './editor';
 import { buildZip, parseSizes, slug } from './export';
-import { TEMPLATES } from './templates';
+import { TEMPLATES, type Template } from './templates';
+import { CATEGORIES, loadCatalog, loadWeight, searchIcons, WEIGHTS, withColor, type IconMeta, type IconWeight } from './iconlib';
 import { drawAdaptive, drawFull, loadImages } from './render';
 import { hydrateIcons, icon } from './icons';
 import { addCustomFont, allFonts, fontInfo, loadFont, nearestWeight, WEIGHT_NAMES, type TextSpec } from './text';
@@ -536,10 +537,40 @@ $('x-copy-svg').addEventListener('click', async () => {
 // ---------------------------------------------------------------- templates
 
 const tplDialog = $<HTMLDialogElement>('template-dialog');
-$('templates').innerHTML = TEMPLATES.map(
-  (t) => `<button type="button" class="tpl" data-tpl="${t.id}"><svg viewBox="0 0 64 64" aria-hidden="true">${t.thumb}</svg><b>${t.name}</b><span>${t.hint}</span></button>`,
-).join('');
-$('templates').addEventListener('click', async (e) => {
+const tplCard = (t: Template) =>
+  `<button type="button" class="tpl" data-tpl="${t.id}"><svg viewBox="0 0 64 64" aria-hidden="true">${t.thumb}</svg><b>${t.name}</b><span>${t.hint}</span></button>`;
+$('templates-ready').innerHTML = TEMPLATES.filter((t) => t.group === 'ready').map(tplCard).join('');
+$('templates-basic').innerHTML = TEMPLATES.filter((t) => t.group === 'basic').map(tplCard).join('');
+
+const svgInner = (svg: string) => svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+
+/** Draws previews for icon templates once their icon weight has loaded. */
+let thumbsDrawn = false;
+async function drawTemplateThumbs() {
+  if (thumbsDrawn) return;
+  thumbsDrawn = true;
+  for (const t of TEMPLATES) {
+    if (!t.icon) continue;
+    const icons = await loadWeight(t.icon.weight);
+    const svg = icons.get(t.icon.name);
+    const el = document.querySelector(`[data-tpl="${t.id}"] svg`);
+    if (!svg || !el) continue;
+    const bg = t.background.fill;
+    const plate = t.plate
+      ? t.plate.shape === 'circle'
+        ? `<circle cx="32" cy="32" r="${32 * t.plate.size}" fill="${t.plate.color}"/>`
+        : `<rect x="${32 - 32 * t.plate.size}" y="${32 - 32 * t.plate.size}" width="${64 * t.plate.size}" height="${64 * t.plate.size}" rx="${14 * t.plate.size}" fill="${t.plate.color}"/>`
+      : '';
+    // Phosphor glyphs fill about 82% of their 256 viewBox.
+    const size = (64 * t.icon.fit) / 0.82;
+    el.innerHTML =
+      `<defs><linearGradient id="tg-${t.id}" x2="0" y2="1"><stop stop-color="${bg.color}"/><stop offset="1" stop-color="${bg.color2}"/></linearGradient></defs>` +
+      `<rect width="64" height="64" rx="14" fill="url(#tg-${t.id})"/>${plate}` +
+      `<svg x="${32 - size / 2}" y="${32 - size / 2}" width="${size}" height="${size}" viewBox="0 0 256 256">${svgInner(withColor(svg, t.icon.color))}</svg>`;
+  }
+}
+
+$('template-dialog').addEventListener('click', async (e) => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-tpl]');
   const t = TEMPLATES.find((x) => x.id === b?.dataset.tpl);
   if (!t) return;
@@ -558,8 +589,102 @@ function openTemplates(welcome: boolean) {
     ? 'Draw an app icon, then export every size for iOS, Android and the web. Pick a starting point; you can change everything afterwards.'
     : 'Pick a starting point. This replaces the artboard, and Undo brings back what you had.';
   tplDialog.showModal();
+  drawTemplateThumbs().catch(() => { thumbsDrawn = false; });
 }
 $('empty-template').addEventListener('click', () => openTemplates(false));
+
+// ---------------------------------------------------------------- icon library
+
+const iconsDialog = $<HTMLDialogElement>('icons-dialog');
+const iconGrid = $('icon-grid');
+const iconSearch = $<HTMLInputElement>('icon-search');
+const iconColor = $<HTMLInputElement>('icon-color');
+const iconHex = $<HTMLInputElement>('icon-hex');
+const PAGE = 180;
+let iconWeight: IconWeight = 'fill';
+let iconCategory: string | null = null;
+let iconLimit = PAGE;
+let iconResults: IconMeta[] = [];
+
+$('icon-weight').innerHTML = WEIGHTS.map((w) => `<button type="button" data-v="${w.id}">${w.label}</button>`).join('');
+$('icon-cats').innerHTML =
+  `<button type="button" class="chip on" data-cat="">All</button>` +
+  CATEGORIES.map((c) => `<button type="button" class="chip" data-cat="${c.id}">${c.label}</button>`).join('');
+
+async function renderIcons() {
+  $('icon-weight').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.v === iconWeight));
+  $('icon-cats').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', (b.dataset.cat || null) === iconCategory));
+  iconGrid.classList.add('loading');
+  try {
+    const [catalog, svgs] = await Promise.all([loadCatalog(), loadWeight(iconWeight)]);
+    iconResults = searchIcons(catalog, iconSearch.value, iconCategory).filter((i) => svgs.has(i.name));
+    const shown = iconResults.slice(0, iconLimit);
+    iconGrid.innerHTML = shown.length
+      ? shown
+          .map((i) => `<button type="button" class="ic" data-icon-name="${i.name}" title="${esc(i.label)}" role="option">${svgs.get(i.name)}<span>${esc(i.label)}</span></button>`)
+          .join('') + (iconResults.length > shown.length ? `<button type="button" class="more-icons" id="icons-more">Show more (${iconResults.length - shown.length} left)</button>` : '')
+      : `<p class="muted">No icons match “${esc(iconSearch.value)}”. Try a simpler word, like heart, money or chat.</p>`;
+  } catch {
+    iconGrid.innerHTML = '<p class="muted">Could not load the icon library. Check your connection and try again.</p>';
+  } finally {
+    iconGrid.classList.remove('loading');
+  }
+}
+
+let searchTimer = 0;
+iconSearch.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => { iconLimit = PAGE; renderIcons(); }, 120);
+});
+$('icon-weight').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+  if (!b) return;
+  iconWeight = b.dataset.v as IconWeight;
+  renderIcons();
+});
+$('icon-cats').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+  if (!b) return;
+  iconCategory = b.dataset.cat || null;
+  iconLimit = PAGE;
+  renderIcons();
+});
+const setIconColor = (v: string) => {
+  iconColor.value = v;
+  iconHex.value = v.toUpperCase();
+  iconGrid.style.color = v;
+};
+iconColor.addEventListener('input', () => setIconColor(iconColor.value));
+iconHex.addEventListener('change', () => {
+  const v = iconHex.value.trim().replace(/^#?/, '#');
+  setIconColor(/^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : iconColor.value);
+});
+
+iconGrid.addEventListener('click', async (e) => {
+  const el = e.target as HTMLElement;
+  if (el.closest('#icons-more')) { iconLimit += PAGE; renderIcons(); return; }
+  const name = el.closest<HTMLButtonElement>('[data-icon-name]')?.dataset.iconName;
+  if (!name) return;
+  const svg = (await loadWeight(iconWeight)).get(name);
+  if (!svg) return;
+  if (editing) cancelText();
+  editor.importSVG(withColor(svg, iconColor.value), { fit: 0.56, fill: { type: 'solid', color: iconColor.value, color2: '#ffffff', angle: 90 }, name });
+  if (!(e as MouseEvent).shiftKey) iconsDialog.close();
+  toast('Icon added. Change its colour in Fill, or select it with other shapes to combine them.');
+});
+
+function openIcons() {
+  // Start from the current fill colour so the icon matches the rest of the design.
+  const f = editor.selection.length ? null : editor.newFill;
+  if (f && f.type !== 'none') setIconColor(f.color);
+  else setIconColor(iconColor.value);
+  iconsDialog.showModal();
+  iconSearch.focus();
+  iconSearch.select();
+  renderIcons();
+}
+$('icons-btn').addEventListener('click', openIcons);
+$('empty-icons').addEventListener('click', openIcons);
 
 // ---------------------------------------------------------------- help + snap
 

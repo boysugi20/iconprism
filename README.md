@@ -8,7 +8,7 @@ Free, open source, and it runs entirely in your browser. Nothing is uploaded.
 
 ## What it does
 
-**New to icon design?** Start from a template, then follow the built-in help (press `?`). Shapes snap to the centre and edges of the artboard and to each other, and dashed guides show what phones will crop.
+**New to icon design?** Start from one of 22 ready-made icons (messages, camera, wallet, weather and more) or pick any of 1,500 library icons, then change the colours and shapes. Or start from a blank template, then follow the built-in help (press `?`). Shapes snap to the centre and edges of the artboard and to each other, and dashed guides show what phones will crop.
 
 **Know your way around vector tools?** Edit points and curve handles, combine shapes with boolean operations, manage layers, type exact positions and sizes, and export iOS 18 dark and tinted icons or any extra PNG sizes.
 
@@ -19,7 +19,8 @@ Free, open source, and it runs entirely in your browser. Nothing is uploaded.
 - **Edit:** move, resize with handles, rotate, flip, align, reorder, group, and drag individual points and curve handles.
 - **Combine:** union (merge), subtract, intersect and exclude.
 - **Style:** solid or gradient fills, strokes, opacity, and a solid or gradient background.
-- **Templates:** six starting points, from blank to a monogram or a chat bubble.
+- **Templates:** 22 finished icons to recolour and tweak, plus 6 simple starting points.
+- **Icon library:** about 1,500 [Phosphor](https://phosphoricons.com) icons in outline, bold, filled and duotone, searchable by name or meaning ("money" finds wallets and coins) and by category. Each one comes in as an editable shape in your colour, ready to combine with Union or Subtract.
 - **Snapping:** to the artboard's edges and centre and to other shapes. Hold ⌘ or Ctrl to skip it, or switch it off in the top bar.
 - **Layers:** select, rename, reorder by dragging, hide and lock.
 - **Reference image:** put a picture under your shapes to trace over. Fade it, hide it or replace it. It is never exported.
@@ -78,7 +79,7 @@ npm run dev
 
 `npm test` runs the unit tests. `npm run build` writes a static site to `dist/`. Pushing to `main` deploys it to GitHub Pages through `.github/workflows/pages.yml`.
 
-Built with [Paper.js](http://paperjs.org) for vector editing and boolean operations, [opentype.js](https://opentype.js.org) for turning text into outlines, and [JSZip](https://stuk.github.io/jszip/) for the export. Bundled fonts come from [Fontsource](https://fontsource.org) under the SIL Open Font License.
+Built with [Paper.js](http://paperjs.org) for vector editing and boolean operations, [opentype.js](https://opentype.js.org) for turning text into outlines, and [JSZip](https://stuk.github.io/jszip/) for the export. Bundled fonts come from [Fontsource](https://fontsource.org) under the SIL Open Font License. Icons are [Phosphor Icons](https://github.com/phosphor-icons/core), MIT licensed (© 2023 Phosphor Icons).
 
 ## License
 

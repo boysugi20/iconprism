@@ -1252,7 +1252,11 @@ export class Editor {
     return { fill: readFill(it), stroke, opacity: it.opacity };
   }
 
-  importSVG(svg: string) {
+  /**
+   * Adds an SVG to the artboard. `fit` is the share of the artboard its longer side fills
+   * (default 0.6); `fill` repaints every shape, as for library icons.
+   */
+  importSVG(svg: string, opts: { fit?: number; fill?: Fill; name?: string; silent?: boolean } = {}): paper.Item {
     let item = paper.project.importSVG(svg, { expandShapes: true, insert: false }) as paper.Item | null;
     if (!item) throw new Error('Could not read that SVG.');
     // Paper wraps the viewBox in a clip rectangle; drop it so ungrouping behaves.
@@ -1275,13 +1279,22 @@ export class Editor {
     const root = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement;
     const vb = root.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
     const isArtboard = vb ? vb[2] === ART && vb[3] === ART : root.getAttribute('width') === String(ART) && root.getAttribute('height') === String(ART);
-    if (!isArtboard) {
-      item.scale((ART * 0.6) / Math.max(b.width, b.height));
+    if (!isArtboard || opts.fit) {
+      item.scale((ART * (opts.fit ?? 0.6)) / Math.max(b.width, b.height));
       item.position = new paper.Point(ART / 2, ART / 2);
     }
+    if (opts.fill) {
+      // Repaint each shape; duotone icons keep their faded second tone through opacity.
+      const shapes = item instanceof paper.Group ? item.getItems({ class: paper.PathItem }) : [item];
+      for (const s of shapes) applyFill(s, opts.fill);
+      if (opts.fill.type === 'linear' && item instanceof paper.Group) applyFill(item, opts.fill);
+    }
+    if (opts.name) item.name = opts.name;
+    if (opts.silent) return item;
     this.setTool('select');
     this.select([item]);
     this.commit();
+    return item;
   }
 
   /**

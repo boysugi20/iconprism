@@ -1,17 +1,60 @@
 import paper from 'paper/dist/paper-core';
 import { applyFill, solid, type Editor, type Fill } from './editor';
+import { iconSvg, type IconWeight } from './iconlib';
 
 export interface Template {
   id: string;
   name: string;
   hint: string;
-  /** Small preview drawn by hand; it only has to read as the same idea. */
+  /** 'ready' templates are finished icons to tweak; 'basic' ones are simple starting shapes. */
+  group: 'ready' | 'basic';
+  /** Small preview drawn by hand. Icon templates leave it empty and get one drawn from the icon. */
   thumb: string;
   background: { enabled: boolean; fill: Fill };
+  /** Library icon the template is built around. */
+  icon?: { name: string; weight: IconWeight; color: string; fit: number };
+  /** Optional shape behind the icon. */
+  plate?: { shape: 'circle' | 'squircle'; color: string; size: number };
   build(editor: Editor): Promise<void> | void;
 }
 
 const linear = (color: string, color2: string, angle = 90): Fill => ({ type: 'linear', color, color2, angle });
+
+/** A finished icon: gradient background, optional plate, one library icon in the middle. */
+function iconTemplate(
+  id: string,
+  name: string,
+  hint: string,
+  icon: string,
+  bg: [string, string],
+  color: string,
+  extra: { weight?: IconWeight; fit?: number; plate?: Template['plate'] } = {},
+): Template {
+  const t: Template = {
+    id,
+    name,
+    hint,
+    group: 'ready',
+    thumb: '',
+    background: { enabled: true, fill: linear(bg[0], bg[1]) },
+    icon: { name: icon, weight: extra.weight ?? 'fill', color, fit: extra.fit ?? 0.56 },
+    plate: extra.plate,
+    async build(editor) {
+      if (t.plate) {
+        const r = (1024 * t.plate.size) / 2;
+        const plate =
+          t.plate.shape === 'circle'
+            ? new paper.Path.Circle(C, r)
+            : new paper.Path.Rectangle(new paper.Rectangle(512 - r, 512 - r, 2 * r, 2 * r), new paper.Size(r * 0.45, r * 0.45));
+        applyFill(plate, solid(t.plate.color));
+        plate.name = 'Plate';
+      }
+      const i = t.icon!;
+      editor.importSVG(await iconSvg(i.name, i.weight, i.color), { fit: i.fit, fill: solid(i.color), name: i.name, silent: true });
+    },
+  };
+  return t;
+}
 const C = new paper.Point(512, 512);
 
 function shape(item: paper.Item, fill: Fill) {
@@ -20,16 +63,40 @@ function shape(item: paper.Item, fill: Fill) {
 }
 
 export const TEMPLATES: Template[] = [
+  iconTemplate('messages', 'Messages', 'Chat bubble on green', 'chat-circle-dots', ['#34d27c', '#128a4b'], '#ffffff'),
+  iconTemplate('camera', 'Camera', 'Camera on graphite', 'camera', ['#3a3a42', '#121216'], '#ffffff'),
+  iconTemplate('notes', 'Notes', 'Pencil on a yellow pad', 'note-pencil', ['#ffe066', '#ffbe0b'], '#3d2c00'),
+  iconTemplate('wallet', 'Wallet', 'Money app on mint', 'wallet', ['#2ee59d', '#00936a'], '#ffffff'),
+  iconTemplate('music', 'Music', 'Notes on hot pink', 'music-notes', ['#ff5f9e', '#c2185b'], '#ffffff'),
+  iconTemplate('weather', 'Weather', 'Sun and cloud on sky blue', 'cloud-sun', ['#5ec8ff', '#1e6fd9'], '#ffffff'),
+  iconTemplate('fitness', 'Fitness', 'Barbell on black', 'barbell', ['#1c1c22', '#000000'], '#e4ff4f'),
+  iconTemplate('food', 'Food', 'Burger on tomato red', 'hamburger', ['#ff6b5a', '#d63a2f'], '#ffffff'),
+  iconTemplate('shop', 'Shop', 'Bag on violet', 'shopping-bag', ['#8b7bff', '#4b32d1'], '#ffffff'),
+  iconTemplate('maps', 'Maps', 'Pin on light grey', 'map-pin', ['#ffffff', '#e4e4e9'], '#ff3b30'),
+  iconTemplate('mail', 'Mail', 'Envelope on blue', 'envelope-simple', ['#4f8dff', '#1d4ed8'], '#ffffff'),
+  iconTemplate('calendar', 'Calendar', 'Check on white', 'calendar-check', ['#ffffff', '#ececf1'], '#ff3b30'),
+  iconTemplate('settings', 'Settings', 'Gear on steel grey', 'gear', ['#9a9aa2', '#56565e'], '#ffffff'),
+  iconTemplate('game', 'Game', 'Controller on neon', 'game-controller', ['#ff5ec8', '#7c3aed'], '#ffffff'),
+  iconTemplate('health', 'Health', 'Heartbeat in a white circle', 'heartbeat', ['#ff5a7a', '#e11d48'], '#e11d48', { fit: 0.4, plate: { shape: 'circle', color: '#ffffff', size: 0.68 } }),
+  iconTemplate('travel', 'Travel', 'Plane on ocean blue', 'airplane-tilt', ['#22c3e6', '#0369a1'], '#ffffff'),
+  iconTemplate('reading', 'Reading', 'Open book on teal', 'book-open', ['#2dd4bf', '#0f766e'], '#ffffff'),
+  iconTemplate('security', 'Security', 'Shield on midnight', 'shield-check', ['#1f2937', '#030712'], '#4ff0c8'),
+  iconTemplate('ai', 'Assistant', 'Sparkle on dark', 'sparkle', ['#2a2a31', '#0d0d10'], '#e4ff4f'),
+  iconTemplate('podcast', 'Podcast', 'Microphone on purple', 'microphone', ['#a66bff', '#5b21b6'], '#ffffff'),
+  iconTemplate('home', 'Smart home', 'House on a tile', 'house', ['#e9eef5', '#cfd8e3'], '#ffffff', { fit: 0.36, plate: { shape: 'squircle', color: '#1e293b', size: 0.62 } }),
+  iconTemplate('pets', 'Pets', 'Paw on warm sand', 'paw-print', ['#f6d6a8', '#e0a96d'], '#5b3a1a'),
   {
     id: 'blank',
     name: 'Blank',
     hint: 'White artboard, nothing on it',
+    group: 'basic',
     thumb: '<rect width="64" height="64" rx="14" fill="#fff"/>',
     background: { enabled: true, fill: solid('#ffffff') },
     build() {},
   },
   {
     id: 'monogram',
+    group: 'basic',
     name: 'Monogram',
     hint: 'One bold letter on a gradient',
     thumb: '<defs><linearGradient id="t1" x2="0" y2="1"><stop stop-color="#7b6cff"/><stop offset="1" stop-color="#3b2bb8"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="url(#t1)"/><path d="M22 46 32 17l10 29h-6l-2-6h-4l-2 6zm10-12h3l-1.5-6z" fill="#fff"/>',
@@ -40,6 +107,7 @@ export const TEMPLATES: Template[] = [
   },
   {
     id: 'badge',
+    group: 'basic',
     name: 'Badge',
     hint: 'Star inside a ring',
     thumb: '<rect width="64" height="64" rx="14" fill="#13151c"/><circle cx="32" cy="32" r="19" fill="#ffd43b"/><path d="m32 20 3.5 7.4 8 .9-6 5.5 1.7 8L32 37.9l-7.2 3.9 1.7-8-6-5.5 8-.9z" fill="#13151c"/>',
@@ -51,6 +119,7 @@ export const TEMPLATES: Template[] = [
   },
   {
     id: 'chat',
+    group: 'basic',
     name: 'Chat bubble',
     hint: 'Rounded bubble with a tail',
     thumb: '<rect width="64" height="64" rx="14" fill="#1fbf6a"/><path d="M16 20a5 5 0 0 1 5-5h22a5 5 0 0 1 5 5v15a5 5 0 0 1-5 5H29l-8 7v-7a5 5 0 0 1-5-5z" fill="#fff"/>',
@@ -67,6 +136,7 @@ export const TEMPLATES: Template[] = [
   },
   {
     id: 'prism',
+    group: 'basic',
     name: 'Prism',
     hint: 'Triangle with a cut-out',
     thumb: '<rect width="64" height="64" rx="14" fill="#1c1c21"/><path d="M32 13 52 47H12z" fill="#c9f75b"/><path d="M32 30 38 41H26z" fill="#1c1c21"/>',
@@ -79,6 +149,7 @@ export const TEMPLATES: Template[] = [
   },
   {
     id: 'stack',
+    group: 'basic',
     name: 'Stack',
     hint: 'Three overlapping tiles',
     thumb: '<rect width="64" height="64" rx="14" fill="#141418"/><rect x="14" y="14" width="24" height="24" rx="5" fill="#ff5ec8"/><rect x="20" y="20" width="24" height="24" rx="5" fill="#4ff0c8"/><rect x="26" y="26" width="24" height="24" rx="5" fill="#e4ff4f"/>',
