@@ -547,3 +547,46 @@ kbd {
   .keys { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 #template-dialog { width: min(620px, calc(100vw - 32px)); }
+
+/* ---------------------------------------------------------------- top bar menus */
+
+.menu-wrap { position: relative; }
+.menu-wrap > .btn i { display: grid; margin-right: -4px; opacity: 0.6; }
+.menu-wrap > .btn i svg { width: 14px; height: 14px; }
+.menu-wrap > .btn[aria-expanded='true'] { background: var(--raised); color: var(--text); }
+.menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: 340px;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.menu > button, .menu > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.menu > button:hover, .menu > label:hover, .menu > label:focus-visible { background: var(--raised); }
+.menu > button > i, .menu > label > i { display: grid; margin-top: 1px; color: var(--accent); }
+.menu > button > span, .menu > label > span { display: grid; gap: 2px; }
+.menu b { font-weight: 600; white-space: nowrap; }
+.menu small { color: var(--muted); font-size: 12px; text-wrap: pretty; }
+
+.btn.with-icon i { display: grid; margin-left: -2px; }
+.btn.with-icon i svg { width: 16px; height: 16px; }
+.btn .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 2px; }
+.ref-menu { width: 280px; padding: 12px; gap: 10px; }
+.ref-menu .btn.small { flex: 1; }

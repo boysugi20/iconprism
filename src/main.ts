@@ -700,8 +700,8 @@ const refShow = $<HTMLInputElement>('ref-show');
 
 function syncReference() {
   const has = !!editor.reference.src;
-  $('ref-empty').hidden = has;
-  $('ref-controls').hidden = !has;
+  $('ref-btn').querySelector<HTMLElement>('.dot')!.hidden = !has;
+  if (!has) closeMenus();
   refOpacity.value = String(editor.reference.opacity);
   refShow.checked = editor.reference.visible;
 }
@@ -781,6 +781,51 @@ window.addEventListener('drop', async (e) => {
   } else {
     setReferenceFile(file);
   }
+});
+
+// ---------------------------------------------------------------- top bar menus
+
+function closeMenus(except?: HTMLElement) {
+  document.querySelectorAll<HTMLElement>('.menu').forEach((m) => {
+    if (m === except) return;
+    m.hidden = true;
+    document.querySelector(`[data-menu="${m.id}"]`)?.setAttribute('aria-expanded', 'false');
+    if (m.id === 'ref-menu') $('ref-btn').setAttribute('aria-expanded', 'false');
+  });
+}
+document.querySelectorAll<HTMLButtonElement>('[data-menu]').forEach((btn) =>
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = $(btn.dataset.menu!);
+    closeMenus(menu);
+    menu.hidden = !menu.hidden;
+    btn.setAttribute('aria-expanded', String(!menu.hidden));
+  }),
+);
+// Picking an item (or a file) closes the menu; clicks elsewhere and Esc do too.
+document.querySelectorAll('.menu').forEach((m) => {
+  m.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('button')) closeMenus(); });
+  m.addEventListener('change', (e) => { if ((e.target as HTMLInputElement).type === 'file') closeMenus(); });
+  m.addEventListener('keydown', (e) => {
+    const k = e as KeyboardEvent;
+    if ((k.key === 'Enter' || k.key === ' ') && (k.target as HTMLElement).matches('label')) {
+      k.preventDefault();
+      (k.target as HTMLElement).querySelector('input')?.click();
+    }
+  });
+});
+document.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('.menu')) closeMenus(); });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
+$('dl-set').addEventListener('click', () => $('export').click());
+
+// No reference yet: the button picks a file. With one: it opens Show, Fade, Replace and Remove.
+$('ref-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!editor.reference.src) { $<HTMLInputElement>('ref-file').click(); return; }
+  const menu = $('ref-menu');
+  closeMenus(menu);
+  menu.hidden = !menu.hidden;
+  $('ref-btn').setAttribute('aria-expanded', String(!menu.hidden));
 });
 
 // ---------------------------------------------------------------- wiring

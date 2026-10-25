@@ -20,10 +20,31 @@
         <button id="undo" class="icon-btn" title="Undo (⌘Z)" data-icon="undo"></button>
         <button id="redo" class="icon-btn" title="Redo (⇧⌘Z)" data-icon="redo"></button>
         <span class="sep"></span>
-        <button id="new" class="btn ghost" title="Start over from a template">New</button>
-        <label class="btn ghost" title="Add an SVG file to the artboard">Import SVG<input id="import" type="file" accept=".svg,image/svg+xml" hidden /></label>
-        <button id="dl-svg" class="btn ghost">SVG</button>
-        <button id="dl-png" class="btn ghost">PNG 1024</button>
+        <button id="new" class="btn ghost" title="Start over from a template">New icon</button>
+        <label class="btn ghost with-icon" title="Add the shapes from an .svg file to the artboard, ready to edit"><i data-icon="shapes"></i>Import SVG<input id="import" type="file" accept=".svg,image/svg+xml" hidden /></label>
+        <div class="menu-wrap">
+          <button class="btn ghost with-icon" id="ref-btn" aria-haspopup="menu" aria-expanded="false" title="Put a picture under your shapes to trace over. It is never exported."><i data-icon="image"></i>Reference image<span class="dot" hidden></span></button>
+          <input id="ref-file" type="file" accept="image/*" hidden />
+          <div class="menu ref-menu" id="ref-menu" hidden>
+            <p class="muted small">Sits under your shapes for tracing. Never exported.</p>
+            <div class="row">
+              <label class="check"><input id="ref-show" type="checkbox" checked /><span>Show</span></label>
+              <label class="opacity"><span>Fade</span><input id="ref-opacity" type="range" min="0.05" max="1" step="0.05" /></label>
+            </div>
+            <div class="row">
+              <label class="btn small">Replace<input id="ref-replace" type="file" accept="image/*" hidden /></label>
+              <button class="btn small danger" id="ref-remove">Remove</button>
+            </div>
+          </div>
+        </div>
+        <div class="menu-wrap">
+          <button class="btn ghost" data-menu="download-menu" aria-haspopup="menu" aria-expanded="false">Download<i data-icon="chevron"></i></button>
+          <div class="menu" id="download-menu" role="menu" hidden>
+            <button id="dl-svg" role="menuitem"><i data-icon="shapes"></i><span><b>SVG file</b><small>This icon as an editable vector file</small></span></button>
+            <button id="dl-png" role="menuitem"><i data-icon="image"></i><span><b>PNG image, 1024 px</b><small>One large image, e.g. for a store listing</small></span></button>
+            <button id="dl-set" role="menuitem"><i data-icon="grid"></i><span><b>Full icon set…</b><small>Every size for iOS, Android and the web in one ZIP</small></span></button>
+          </div>
+        </div>
       </div>
       <div class="bar-group right">
         <button id="snap" class="toggle on" title="Snap to the artboard and other shapes (hold ⌘ or Ctrl to skip)" aria-pressed="true"><i data-icon="magnet"></i>Snap</button>
@@ -48,7 +69,7 @@
             <button class="btn primary" id="empty-template">Choose a template</button>
             <button class="btn" id="empty-help">How it works</button>
           </div>
-          <p class="muted small">Tip: drop an SVG here to import it, or an image to trace over.</p>
+          <p class="muted small">Tracing a sketch or logo? Use <b>Reference image</b> in the top bar, or drop the picture here.</p>
         </div>
         <div class="drop" id="drop" hidden><span>Drop an SVG to import it, or an image to trace over</span></div>
         <div class="hint" id="hint"></div>
@@ -172,23 +193,6 @@
         </section>
 
         <section class="block">
-          <h2>Reference image <small>for tracing</small></h2>
-          <div id="ref-empty" class="row">
-            <label class="btn small" title="Show a picture under your shapes to trace over. It is never exported.">Add image<input id="ref-file" type="file" accept="image/*" hidden /></label>
-          </div>
-          <div id="ref-controls" hidden>
-            <div class="row">
-              <label class="check"><input id="ref-show" type="checkbox" checked /><span>Show</span></label>
-              <label class="opacity"><span>Fade</span><input id="ref-opacity" type="range" min="0.05" max="1" step="0.05" /></label>
-            </div>
-            <div class="row">
-              <label class="btn small">Replace<input id="ref-replace" type="file" accept="image/*" hidden /></label>
-              <button class="btn small danger" id="ref-remove">Remove</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="block">
           <h2>Preview</h2>
           <div class="previews">
             <figure><canvas id="pv-ios" width="128" height="128"></canvas><figcaption>iOS</figcaption></figure>
@@ -236,7 +240,7 @@
       <form method="dialog">
         <h2>How iconprism works</h2>
         <ol class="steps">
-          <li><b>Draw.</b> Pick a tool on the left (rectangle, circle, star, pen, text) and drag on the artboard.</li>
+          <li><b>Draw.</b> Pick a tool on the left (rectangle, circle, star, pen, text) and drag on the artboard. To trace a sketch or logo, add it with <i>Reference image</i> in the top bar.</li>
           <li><b>Style.</b> Select a shape and change its colour, gradient and outline in the panel on the right.</li>
           <li><b>Combine.</b> Select two or more shapes (Shift+click) and use Union, Subtract, Intersect or Exclude to build new shapes.</li>
           <li><b>Check.</b> Keep important parts inside the dashed guides. The previews show how phones will crop your icon.</li>
