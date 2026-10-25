@@ -219,7 +219,9 @@ export class Editor {
     this.refLayer = new paper.Layer();
     this.refLayer.locked = true;
     this.content = new paper.Layer();
-    this.content.selectedColor = new paper.Color(ACCENT);
+    // Paper draws selection in one flat colour, which vanishes on shapes of that colour.
+    // Keep its selection state but draw the outline and points ourselves (see drawNodes).
+    this.content.selectedColor = new paper.Color(0, 0, 0, 0);
     this.draft = new paper.Layer();
     this.guideLayer = new paper.Layer();
     this.guideLayer.locked = true;
@@ -522,8 +524,49 @@ export class Editor {
       new paper.Path.Line({ from: [x, -span], to: [x, span], parent: ui, strokeColor: '#ff5ec8', strokeWidth: 1, strokeScaling: false });
     for (const y of this.snapGuides.y)
       new paper.Path.Line({ from: [-span, y], to: [span, y], parent: ui, strokeColor: '#ff5ec8', strokeWidth: 1, strokeScaling: false });
+    if (this.tool === 'node') this.drawNodes();
     if (extra?.rubber)
       new paper.Path.Line({ from: extra.rubber[0], to: extra.rubber[1], parent: ui, strokeColor: ACCENT, strokeWidth: 1, strokeScaling: false, dashArray: [4, 3] });
+  }
+
+  /**
+   * Edit-point overlay: a dark-and-light double outline plus white points with dark rims, so
+   * points stay visible on any fill. Selected points are filled with the accent colour and show
+   * their curve handles.
+   */
+  private drawNodes() {
+    const ui = this.ui;
+    const z = paper.view.zoom;
+    const dark = new paper.Color(0.05, 0.05, 0.05, 0.9);
+    for (const path of this.selectedPaths()) {
+      const outline = path.clone({ insert: false, deep: false }) as paper.Path;
+      outline.transform(path.parent?.globalMatrix ?? new paper.Matrix());
+      for (const [color, width] of [[dark, 3], [new paper.Color('#4fb0ff'), 1.25]] as const) {
+        const o = outline.clone({ insert: false });
+        Object.assign(o, { fillColor: null, strokeColor: color, strokeWidth: width, strokeScaling: false, dashArray: [], opacity: 1, selected: false });
+        ui.addChild(o);
+      }
+      for (const seg of path.segments) {
+        const pt = path.localToGlobal(seg.point);
+        if (seg.selected) {
+          for (const h of [seg.handleIn, seg.handleOut]) {
+            if (h.isZero()) continue;
+            const hp = path.localToGlobal(seg.point.add(h));
+            new paper.Path.Line({ from: pt, to: hp, parent: ui, strokeColor: '#4fb0ff', strokeWidth: 1, strokeScaling: false });
+            new paper.Path.Circle({ center: hp, radius: 3.5 / z, parent: ui, fillColor: '#ffffff', strokeColor: dark, strokeWidth: 1.5, strokeScaling: false });
+          }
+        }
+        const r = (seg.selected ? 5 : 4) / z;
+        new paper.Path.Rectangle({
+          rectangle: new paper.Rectangle(pt.x - r, pt.y - r, 2 * r, 2 * r),
+          parent: ui,
+          fillColor: seg.selected ? ACCENT : '#ffffff',
+          strokeColor: dark,
+          strokeWidth: 1.5,
+          strokeScaling: false,
+        });
+      }
+    }
   }
 
   // ---------------------------------------------------------------- tools
@@ -552,7 +595,10 @@ export class Editor {
     }
     switch (this.tool) {
       case 'select': return this.selectDown(e);
-      case 'node': return this.nodeDown(e);
+      case 'node':
+        this.nodeDown(e);
+        this.drawUI();
+        return;
       case 'pen': return this.penDown(e);
       case 'text': return this.textDown(e);
       default: this.drag = { kind: 'create', from: this.snapPoint(e.point, mods(e).noSnap), item: null };
@@ -613,6 +659,7 @@ export class Editor {
         for (const p of this.selectedPaths())
           for (const s of p.segments) if (s.selected) s.point = s.point.add(e.delta);
         d.moved = true;
+        this.drawUI();
         this.onLive();
         return;
       case 'handle': {
@@ -621,6 +668,7 @@ export class Editor {
         const other = d.which === 'out' ? s.handleIn : s.handleOut;
         const mirror = !mods(e).alt && !other.isZero() ? v.normalize(-other.length) : other;
         if (d.which === 'out') { s.handleOut = v; s.handleIn = mirror; } else { s.handleIn = v; s.handleOut = mirror; }
+        this.drawUI();
         this.onLive();
         return;
       }

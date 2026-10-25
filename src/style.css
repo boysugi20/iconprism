@@ -882,3 +882,33 @@ kbd {
 .bar .btn.with-icon { gap: 6px; }
 #snap { height: 32px; }
 .mini-preview canvas { display: block; flex: none; }
+
+/* Tool rail: a short explanation flies out on hover or keyboard focus. */
+.tools { position: relative; z-index: 5; }
+.tool-tip {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translate(-4px, -50%);
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 2px 8px;
+  width: max-content;
+  max-width: 240px;
+  padding: 8px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: #1f1f1f;
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s, transform 0.12s;
+}
+.tool-tip b { font-size: 12.5px; white-space: nowrap; }
+.tool-tip kbd { position: static; justify-self: end; font-size: 10px; opacity: 1; }
+.tool-tip small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; text-wrap: pretty; }
+.tools button:hover .tool-tip, .tools button:focus-visible .tool-tip { opacity: 1; transform: translate(0, -50%); transition-delay: 0.25s; }
+@media (hover: none) { .tool-tip { display: none; } }

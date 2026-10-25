@@ -12,16 +12,16 @@ import { addCustomFont, allFonts, fontInfo, loadFont, nearestWeight, WEIGHT_NAME
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-const TOOLS: { id: ToolName; label: string; key: string; hint: string }[] = [
-  { id: 'select', label: 'Select', key: 'V', hint: 'Click to select, Shift to add. Drag handles to resize. Double-click a shape to edit its points.' },
-  { id: 'node', label: 'Edit points', key: 'A', hint: 'Drag points and handles. Click an edge to add a point. Double-click a point for curve or corner. ⌫ deletes points.' },
-  { id: 'rect', label: 'Rectangle', key: 'R', hint: 'Drag to draw. Shift for a square, Alt from the centre. Set corner radius in Shape tools.' },
-  { id: 'ellipse', label: 'Ellipse', key: 'O', hint: 'Drag to draw. Shift for a circle, Alt from the centre.' },
-  { id: 'polygon', label: 'Polygon', key: 'Y', hint: 'Drag out from the centre. Set the number of sides in Shape tools.' },
-  { id: 'star', label: 'Star', key: 'S', hint: 'Drag out from the centre. Set the number of points in Shape tools.' },
-  { id: 'line', label: 'Line', key: 'L', hint: 'Drag to draw. Shift snaps to 45°. Uses the stroke colour and width.' },
-  { id: 'pen', label: 'Pen', key: 'P', hint: 'Click for corners, drag for curves. Click the first point to close, Enter to finish.' },
-  { id: 'text', label: 'Text', key: 'T', hint: 'Click to type. Enter finishes, Shift+Enter adds a line, Esc cancels. Double-click text to edit it.' },
+const TOOLS: { id: ToolName; label: string; key: string; desc: string; hint: string }[] = [
+  { id: 'select', label: 'Select', key: 'V', desc: 'Pick, move and resize shapes.', hint: 'Click to select, Shift to add. Drag handles to resize. Double-click a shape to edit its points.' },
+  { id: 'node', label: 'Edit points', key: 'A', desc: 'Drag points and curves to reshape a shape.', hint: 'Drag points and handles. Click an edge to add a point. Double-click a point for curve or corner. ⌫ deletes points.' },
+  { id: 'rect', label: 'Rectangle', key: 'R', desc: 'Draw squares and rectangles.', hint: 'Drag to draw. Shift for a square, Alt from the centre. Set corner radius in Shape tools.' },
+  { id: 'ellipse', label: 'Ellipse', key: 'O', desc: 'Draw circles and ovals.', hint: 'Drag to draw. Shift for a circle, Alt from the centre.' },
+  { id: 'polygon', label: 'Polygon', key: 'Y', desc: 'Draw triangles, hexagons and more.', hint: 'Drag out from the centre. Set the number of sides in Shape tools.' },
+  { id: 'star', label: 'Star', key: 'S', desc: 'Draw stars with any number of points.', hint: 'Drag out from the centre. Set the number of points in Shape tools.' },
+  { id: 'line', label: 'Line', key: 'L', desc: 'Draw straight lines.', hint: 'Drag to draw. Shift snaps to 45°. Uses the stroke colour and width.' },
+  { id: 'pen', label: 'Pen', key: 'P', desc: 'Draw your own shape, point by point.', hint: 'Click for corners, drag for curves. Click the first point to close, Enter to finish.' },
+  { id: 'text', label: 'Text', key: 'T', desc: 'Type words in real fonts.', hint: 'Click to type. Enter finishes, Shift+Enter adds a line, Esc cancels. Double-click text to edit it.' },
 ];
 
 const canvas = $<HTMLCanvasElement>('canvas');
@@ -44,7 +44,9 @@ function toast(msg: string) {
 
 const toolsEl = $('tools');
 toolsEl.innerHTML = TOOLS.map(
-  (t) => `<button data-tool="${t.id}" title="${t.label} (${t.key})" aria-label="${t.label}">${icon(t.id)}<kbd>${t.key}</kbd></button>`,
+  (t) =>
+    `<button data-tool="${t.id}" aria-label="${t.label}: ${t.desc} Shortcut ${t.key}">${icon(t.id)}<kbd>${t.key}</kbd>` +
+    `<span class="tool-tip" aria-hidden="true"><b>${t.label}</b><kbd>${t.key}</kbd><small>${t.desc}</small></span></button>`,
 ).join('');
 toolsEl.addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-tool]');
