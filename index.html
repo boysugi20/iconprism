@@ -21,6 +21,7 @@
         <button id="redo" class="icon-btn" title="Redo (⇧⌘Z)" data-icon="redo"></button>
         <span class="sep"></span>
         <button id="new" class="btn ghost" title="Start over from a template">New icon</button>
+        <button class="btn ghost with-icon ai-btn" id="ai-btn" title="Describe an icon and let an AI model draw it, or ask it to change the current one"><i data-icon="wand"></i>AI</button>
         <button class="btn ghost with-icon" id="icons-btn" title="Pick from 1,500 ready-made icons and customise it"><i data-icon="sparkle"></i>Add icon</button>
         <label class="btn ghost with-icon" title="Add the shapes from an .svg file to the artboard, ready to edit"><i data-icon="shapes"></i>Import SVG<input id="import" type="file" accept=".svg,image/svg+xml" hidden /></label>
         <div class="menu-wrap">
@@ -249,6 +250,55 @@
           <div class="templates" id="templates-basic"></div>
         </div>
         <div class="actions"><button value="cancel" class="btn ghost">Cancel</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="ai-dialog" class="wide ai-dialog">
+      <form method="dialog">
+        <div class="icons-head">
+          <h2>AI icon assistant</h2>
+          <button type="button" class="btn small" id="ai-settings-btn"><i data-icon="gear"></i>AI settings</button>
+        </div>
+        <div class="seg" id="ai-mode">
+          <button type="button" data-v="generate">Create a new icon</button><button type="button" data-v="edit">Change the current icon</button>
+        </div>
+        <textarea id="ai-prompt" rows="3" placeholder="Describe the icon, e.g. a friendly cloud with a lightning bolt, blue gradient"></textarea>
+        <div class="chips" id="ai-examples"></div>
+        <div class="row ai-go-row">
+          <button type="button" class="btn primary" id="ai-go">Generate</button>
+          <span class="muted small" id="ai-status" role="status"></span>
+        </div>
+        <div class="ai-result" id="ai-result" hidden>
+          <img id="ai-preview" alt="Preview of the AI result" />
+          <div class="ai-result-side">
+            <p class="muted small">Every part comes in as an editable shape. Undo brings back what you had.</p>
+            <button type="button" class="btn primary" id="ai-apply">Use this icon</button>
+            <button type="button" class="btn" id="ai-add" title="Keep the current icon and put this artwork on top">Add on top</button>
+            <button type="button" class="btn ghost" id="ai-retry">Try again</button>
+          </div>
+        </div>
+        <p class="muted small" id="ai-model-line"></p>
+        <div class="actions"><button value="cancel" class="btn ghost">Close</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="ai-settings">
+      <form method="dialog">
+        <h2>Connect an AI model</h2>
+        <p class="muted">Bring your own key. iconprism calls the provider straight from your browser. There is no iconprism server, and your key and prompts go nowhere else.</p>
+        <label class="field"><span>Provider</span><select id="ai-provider" class="select"></select></label>
+        <p class="muted small" id="ai-provider-note"></p>
+        <label class="field" id="ai-base-field"><span>Base URL</span><input id="ai-base" spellcheck="false" autocomplete="off" /></label>
+        <label class="field" id="ai-key-field"><span>API key <a id="ai-key-link" target="_blank" rel="noopener">Get a key</a></span><input id="ai-key" type="password" spellcheck="false" autocomplete="off" /></label>
+        <label class="field"><span>Model</span><input id="ai-model" list="ai-models" spellcheck="false" autocomplete="off" placeholder="Press Load models, or type a model name" /><datalist id="ai-models"></datalist></label>
+        <div class="row wrap">
+          <button type="button" class="btn small" id="ai-load-models">Load models</button>
+          <button type="button" class="btn small" id="ai-test" title="Sends one tiny request; your provider may charge a fraction of a cent">Test connection</button>
+          <span class="muted small" id="ai-test-status" role="status"></span>
+        </div>
+        <label class="check"><input type="checkbox" id="ai-remember" /><span>Remember the key on this device</span></label>
+        <p class="muted small">Off: the key is forgotten when you close this tab. On: it stays in this browser's storage, where anyone using this browser profile could read it. Requests are billed to your account by your provider.</p>
+        <div class="actions"><button value="cancel" class="btn ghost">Cancel</button><button id="ai-save" value="default" class="btn primary">Save</button></div>
       </form>
     </dialog>
 

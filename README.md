@@ -20,6 +20,7 @@ Free, open source, and it runs entirely in your browser. Nothing is uploaded.
 - **Combine:** union (merge), subtract, intersect and exclude.
 - **Style:** solid or gradient fills, strokes, opacity, and a solid or gradient background.
 - **Templates:** 22 finished icons to recolour and tweak, plus 6 simple starting points.
+- **AI assistant (bring your own key):** describe an icon and an AI model draws it, or ask it to change the current one ("make it a green gradient"). You see a preview first, and the result arrives as editable shapes you can Undo. Works with [OpenRouter](https://openrouter.ai) (hundreds of models from Anthropic, OpenAI, Google and others with one key), OpenAI, Google Gemini, local models through Ollama or LM Studio, or any OpenAI-compatible endpoint.
 - **Icon library:** about 1,500 [Phosphor](https://phosphoricons.com) icons in outline, bold, filled and duotone, searchable by name or meaning ("money" finds wallets and coins) and by category. Each one comes in as an editable shape in your colour, ready to combine with Union or Subtract.
 - **Snapping:** to the artboard's edges and centre and to other shapes. Hold ⌘ or Ctrl to skip it, or switch it off in the top bar.
 - **Layers:** select, rename, reorder by dragging, hide and lock.
@@ -48,6 +49,14 @@ Install steps for each platform, including Flutter paths, are in the ZIP's `READ
 - **iOS** uses the whole artboard. iOS rounds the corners itself; the yellow guide shows roughly where.
 - **Android adaptive icons** use a 108 dp canvas where only the centre 72 dp is visible. The artboard fills that centre 72 dp and the background extends to the edges. Keep important artwork inside the Android safe-zone guide, because some launchers crop to a circle.
 - **iOS and store icons** cannot be transparent. If the background is off, they get a solid colour behind the artwork.
+
+## AI and your key
+
+iconprism has no server. The AI assistant calls your chosen provider straight from your browser with your own key, so prompts and keys go only to that provider, and the provider bills your account.
+
+- By default the key is kept only for the current tab. Tick **Remember the key on this device** to keep it in the browser's storage; anyone using that browser profile could then read it.
+- Returned SVG is cleaned before use: scripts, embedded documents, images, event handlers and external links are removed.
+- Local models: start Ollama with `OLLAMA_ORIGINS` set to the site's origin (or enable CORS in LM Studio) so the browser may call it.
 
 ## Shortcuts
 

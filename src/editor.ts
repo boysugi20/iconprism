@@ -119,6 +119,43 @@ export function readFill(item: paper.Item): Fill {
   return solid(hex(c));
 }
 
+/** Reads a solid or linear-gradient fill from an SVG element, for turning a background rect into the artboard background. */
+function fillFromSvg(el: Element, doc: Document): Fill | null {
+  const styleFill = /(?:^|;)\s*fill\s*:\s*([^;]+)/.exec(el.getAttribute('style') ?? '')?.[1];
+  const raw = (styleFill ?? el.getAttribute('fill') ?? '#000000').trim();
+  const css = (c: string) => {
+    try {
+      return new paper.Color(c).toCSS(true);
+    } catch {
+      return null;
+    }
+  };
+  const ref = /^url\(\s*['"]?#([^'")\s]+)/.exec(raw)?.[1];
+  if (!ref) {
+    const c = raw === 'none' ? null : css(raw);
+    return c ? solid(c) : null;
+  }
+  const grad = doc.getElementById(ref);
+  if (!grad || grad.localName !== 'linearGradient') return null;
+  let stopsFrom: Element = grad;
+  const href = (grad.getAttribute('href') ?? grad.getAttribute('xlink:href'))?.replace(/^#/, '');
+  if (!grad.getElementsByTagName('stop').length && href) stopsFrom = doc.getElementById(href) ?? grad;
+  const stops = [...stopsFrom.getElementsByTagName('stop')];
+  const stopColor = (st: Element) =>
+    css(/(?:^|;)\s*stop-color\s*:\s*([^;]+)/.exec(st.getAttribute('style') ?? '')?.[1] ?? st.getAttribute('stop-color') ?? '#000000');
+  if (stops.length < 2) return null;
+  const a = stopColor(stops[0]);
+  const b = stopColor(stops[stops.length - 1]);
+  if (!a || !b) return null;
+  const num = (name: string, d: number) => {
+    const v = grad.getAttribute(name);
+    if (v == null) return d;
+    return v.trim().endsWith('%') ? parseFloat(v) / 100 : parseFloat(v);
+  };
+  const angle = Math.round((Math.atan2(num('y2', 0) - num('y1', 0), num('x2', 1) - num('x1', 0)) * 180) / Math.PI);
+  return { type: 'linear', color: a, color2: b, angle };
+}
+
 export class Editor {
   tool: ToolName = 'select';
   selection: paper.Item[] = [];
@@ -1358,6 +1395,78 @@ export class Editor {
     if (opts.silent) return item;
     this.setTool('select');
     this.select([item]);
+    this.commit();
+    return item;
+  }
+
+  /**
+   * Puts an SVG designed as a whole icon (any square viewBox) onto the artboard, for AI results.
+   * 'replace' swaps the whole icon as one undo step, turning a full-size first rectangle into the
+   * artboard background; 'add' puts the artwork on top of what is there.
+   */
+  placeIconSvg(svg: string, mode: 'replace' | 'add'): paper.Item | null {
+    const SVGNS = 'http://www.w3.org/2000/svg';
+    const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+    const root = doc.documentElement;
+    if (root.localName !== 'svg') throw new Error('Not an SVG.');
+    const vb = (root.getAttribute('viewBox') ?? `0 0 ${root.getAttribute('width') ?? ART} ${root.getAttribute('height') ?? ART}`)
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number);
+    const [vx, vy, vw, vh] = vb.length === 4 && vb.every(Number.isFinite) && vb[2] > 0 && vb[3] > 0 ? vb : [0, 0, ART, ART];
+    const drawable = () => [...root.children].filter((c) => !['defs', 'title', 'desc', 'metadata'].includes(c.localName));
+
+    let bg: Fill | null = null;
+    const first = drawable()[0];
+    if (mode === 'replace' && first?.localName === 'rect' && !first.getAttribute('transform')) {
+      const n = (a: string) => parseFloat(first.getAttribute(a) ?? '0') || 0;
+      const covers = n('x') <= vx && n('y') <= vy && n('x') + n('width') >= vx + vw && n('y') + n('height') >= vy + vh;
+      if (covers) {
+        bg = fillFromSvg(first, doc);
+        if (bg) first.remove();
+      }
+    }
+
+    // Map the drawing's view onto the 1024 artboard.
+    const s = ART / Math.max(vw, vh);
+    const wrap = doc.createElementNS(SVGNS, 'g');
+    wrap.setAttribute('transform', `scale(${s}) translate(${-vx} ${-vy})`);
+    for (const c of drawable()) wrap.appendChild(c);
+    root.appendChild(wrap);
+    root.setAttribute('viewBox', `0 0 ${ART} ${ART}`);
+    root.setAttribute('width', String(ART));
+    root.setAttribute('height', String(ART));
+    const out = new XMLSerializer().serializeToString(root);
+
+    this.finishPen();
+    if (mode === 'replace') {
+      this.hideForEditing(null);
+      this.docVersion++;
+      this.content.removeChildren();
+      if (bg) this.background = { enabled: true, fill: bg };
+      this.applyBackground();
+    }
+    this.content.activate();
+    let item: paper.Item | null = null;
+    if (wrap.children.length) {
+      try {
+        item = this.importSVG(out, { silent: true });
+      } catch {
+        item = null; // background only
+      }
+    }
+    // Unpack the drawing into separate layers so each shape is easy to pick and restyle.
+    let placed: paper.Item[] = item ? [item] : [];
+    if (item instanceof paper.Group && !item.clipped && item.parent === this.content) {
+      const kids = item.removeChildren();
+      for (const k of kids) k.opacity *= item.opacity;
+      this.content.insertChildren(item.index, kids);
+      item.remove();
+      placed = kids;
+      item = kids[kids.length - 1] ?? null;
+    }
+    this.setTool('select');
+    this.select(placed);
     this.commit();
     return item;
   }

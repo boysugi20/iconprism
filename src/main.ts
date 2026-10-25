@@ -3,6 +3,7 @@ import paper from 'paper/dist/paper-core';
 import { Editor, isText, type Align, type BooleanOp, type Fill, type ToolName } from './editor';
 import { buildZip, parseSizes, slug } from './export';
 import { TEMPLATES, type Template } from './templates';
+import { buildMessages, chat, EXAMPLES, extractSvg, isReady, listModels, loadSettings, PROVIDERS, sanitizeSvg, saveSettings, suggestModel, type AiSettings } from './ai';
 import { CATEGORIES, loadCatalog, loadWeight, searchIcons, WEIGHTS, withColor, type IconMeta, type IconWeight } from './iconlib';
 import { drawAdaptive, drawFull, loadImages } from './render';
 import { hydrateIcons, icon } from './icons';
@@ -929,6 +930,207 @@ window.addEventListener('drop', async (e) => {
   } else {
     setReferenceFile(file);
   }
+});
+
+// ---------------------------------------------------------------- AI
+
+const aiDialog = $<HTMLDialogElement>('ai-dialog');
+const aiSettingsDialog = $<HTMLDialogElement>('ai-settings');
+const aiPrompt = $<HTMLTextAreaElement>('ai-prompt');
+const aiGo = $<HTMLButtonElement>('ai-go');
+const aiStatus = $('ai-status');
+let aiSettings: AiSettings | null = loadSettings();
+let aiMode: 'generate' | 'edit' = 'generate';
+let aiRun: AbortController | null = null;
+let aiResult: string | null = null;
+let openAiAfterSettings = false;
+
+const providerOf = (id: string) => PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[0];
+
+function syncAiDialog() {
+  $('ai-mode').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.v === aiMode));
+  const empty = editor.layers().length === 0;
+  $('ai-mode').querySelector<HTMLButtonElement>('[data-v="edit"]')!.disabled = empty;
+  aiPrompt.placeholder =
+    aiMode === 'edit'
+      ? 'Say what to change, e.g. make it a blue gradient, round the corners, make the bolt bigger'
+      : 'Describe the icon, e.g. a friendly cloud with a lightning bolt, blue gradient';
+  aiGo.textContent = aiRun ? 'Cancel' : aiMode === 'edit' ? 'Apply change' : 'Generate';
+  aiGo.classList.toggle('primary', !aiRun);
+  $('ai-model-line').innerHTML = aiSettings
+    ? `Using <b>${esc(aiSettings.model)}</b> via ${esc(providerOf(aiSettings.provider).name)}. Each request is billed to your account by your provider.`
+    : '';
+}
+
+$('ai-examples').innerHTML = EXAMPLES.map((e) => `<button type="button" class="chip">${esc(e)}</button>`).join('');
+$('ai-examples').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest('button');
+  if (!b) return;
+  aiMode = 'generate';
+  aiPrompt.value = b.textContent ?? '';
+  syncAiDialog();
+  aiPrompt.focus();
+});
+$('ai-mode').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+  if (!b || b.disabled) return;
+  aiMode = b.dataset.v as 'generate' | 'edit';
+  syncAiDialog();
+});
+
+async function runAi() {
+  if (aiRun) { aiRun.abort(); return; }
+  if (!isReady(aiSettings)) { openAiSettings(true); return; }
+  const request = aiPrompt.value.trim();
+  if (!request) { toast(aiMode === 'edit' ? 'Say what to change first.' : 'Describe the icon first.'); aiPrompt.focus(); return; }
+  const settings = aiSettings;
+  aiRun = new AbortController();
+  $('ai-result').hidden = true;
+  const started = Date.now();
+  const tick = window.setInterval(() => (aiStatus.textContent = `Drawing… ${Math.round((Date.now() - started) / 1000)} s. This can take up to a minute.`), 500);
+  aiStatus.textContent = 'Drawing…';
+  syncAiDialog();
+  try {
+    const messages = buildMessages(aiMode, request, aiMode === 'edit' ? editor.toSVG() : undefined);
+    const reply = await chat(settings, messages, aiRun.signal);
+    const svg = extractSvg(reply);
+    if (!svg) throw new Error('The model answered without an SVG. Try again, or pick a stronger model in AI settings.');
+    aiResult = sanitizeSvg(svg);
+    const img = $<HTMLImageElement>('ai-preview');
+    URL.revokeObjectURL(img.src);
+    img.src = URL.createObjectURL(new Blob([aiResult], { type: 'image/svg+xml' }));
+    $('ai-result').hidden = false;
+    $('ai-add').hidden = aiMode === 'edit';
+    aiStatus.textContent = `Done in ${Math.round((Date.now() - started) / 1000)} s.`;
+  } catch (err) {
+    aiStatus.textContent = (err as Error).name === 'AbortError' ? 'Cancelled.' : (err as Error).message;
+  } finally {
+    clearInterval(tick);
+    aiRun = null;
+    syncAiDialog();
+  }
+}
+
+aiGo.addEventListener('click', runAi);
+aiPrompt.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); runAi(); }
+});
+$('ai-retry').addEventListener('click', runAi);
+
+function useAiResult(mode: 'replace' | 'add') {
+  if (!aiResult) return;
+  if (editing) cancelText();
+  try {
+    editor.placeIconSvg(aiResult, mode);
+    aiDialog.close();
+    toast(mode === 'replace' ? 'Icon placed. Undo brings back what you had.' : 'Artwork added on top.');
+  } catch (err) {
+    toast((err as Error).message);
+  }
+}
+$('ai-apply').addEventListener('click', () => useAiResult('replace'));
+$('ai-add').addEventListener('click', () => useAiResult('add'));
+
+function openAi() {
+  if (!isReady(aiSettings)) { openAiSettings(true); return; }
+  if (editor.layers().length === 0) aiMode = 'generate';
+  syncAiDialog();
+  aiDialog.showModal();
+  aiPrompt.focus();
+}
+$('ai-btn').addEventListener('click', openAi);
+$('ai-settings-btn').addEventListener('click', () => { aiDialog.close(); openAiSettings(true); });
+aiDialog.addEventListener('close', () => aiRun?.abort());
+
+// AI settings
+const aiProvider = $<HTMLSelectElement>('ai-provider');
+const aiBase = $<HTMLInputElement>('ai-base');
+const aiKey = $<HTMLInputElement>('ai-key');
+const aiModel = $<HTMLInputElement>('ai-model');
+const aiRemember = $<HTMLInputElement>('ai-remember');
+const aiTestStatus = $('ai-test-status');
+aiProvider.innerHTML = PROVIDERS.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+
+function formSettings(): AiSettings {
+  return { provider: aiProvider.value, baseUrl: aiBase.value.trim(), apiKey: aiKey.value.trim(), model: aiModel.value.trim(), remember: aiRemember.checked };
+}
+
+function syncProvider(resetUrl: boolean) {
+  const p = providerOf(aiProvider.value);
+  $('ai-provider-note').textContent = p.note;
+  if (resetUrl) aiBase.value = p.baseUrl;
+  $('ai-base-field').hidden = !!p.baseUrl && p.id !== 'custom' && !p.baseUrl.includes('localhost');
+  const link = $<HTMLAnchorElement>('ai-key-link');
+  link.hidden = !p.keyUrl;
+  if (p.keyUrl) link.href = p.keyUrl;
+  aiKey.placeholder = p.needsKey ? 'Paste your API key' : 'Not needed for this provider';
+}
+
+function openAiSettings(thenOpenAi: boolean) {
+  openAiAfterSettings = thenOpenAi;
+  const s = aiSettings;
+  aiProvider.value = s?.provider ?? 'openrouter';
+  syncProvider(!s);
+  if (s) {
+    aiBase.value = s.baseUrl;
+    aiKey.value = s.apiKey;
+    aiModel.value = s.model;
+    aiRemember.checked = s.remember;
+  } else {
+    aiKey.value = '';
+    aiModel.value = '';
+    aiRemember.checked = false;
+  }
+  aiTestStatus.textContent = '';
+  aiSettingsDialog.showModal();
+  // OpenRouter lists its models without a key, so the model box can fill in right away.
+  if (!s && aiProvider.value === 'openrouter') loadModels(true);
+}
+
+aiProvider.addEventListener('change', () => {
+  syncProvider(true);
+  aiModel.value = '';
+  $('ai-models').innerHTML = '';
+  aiTestStatus.textContent = '';
+  if (aiProvider.value === 'openrouter') loadModels(true);
+});
+
+async function loadModels(quiet = false) {
+  aiTestStatus.textContent = 'Loading models…';
+  try {
+    const ids = await listModels(formSettings());
+    $('ai-models').innerHTML = ids.map((id) => `<option value="${esc(id)}"></option>`).join('');
+    if (!aiModel.value) aiModel.value = suggestModel(ids);
+    aiTestStatus.textContent = `${ids.length} models available. Type to search the list.`;
+  } catch (err) {
+    aiTestStatus.textContent = quiet ? '' : (err as Error).message;
+  }
+}
+$('ai-load-models').addEventListener('click', () => loadModels());
+
+$('ai-test').addEventListener('click', async () => {
+  const s = formSettings();
+  if (!isReady(s)) { aiTestStatus.textContent = 'Fill in the key and model first.'; return; }
+  aiTestStatus.textContent = 'Testing…';
+  try {
+    await chat(s, [{ role: 'user', content: 'Reply with the single word: ok' }]);
+    aiTestStatus.textContent = 'Connected.';
+  } catch (err) {
+    aiTestStatus.textContent = (err as Error).message;
+  }
+});
+
+$('ai-save').addEventListener('click', (e) => {
+  e.preventDefault();
+  const s = formSettings();
+  const p = providerOf(s.provider);
+  if (!s.baseUrl) { aiTestStatus.textContent = 'Enter the base URL.'; return; }
+  if (p.needsKey && !s.apiKey) { aiTestStatus.textContent = 'Paste your API key.'; return; }
+  if (!s.model) { aiTestStatus.textContent = 'Choose a model (press Load models).'; return; }
+  aiSettings = s;
+  saveSettings(s);
+  aiSettingsDialog.close();
+  if (openAiAfterSettings) openAi();
 });
 
 // ---------------------------------------------------------------- top bar menus
