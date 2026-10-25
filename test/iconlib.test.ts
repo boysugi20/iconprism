@@ -19,7 +19,8 @@ describe('searchIcons', () => {
     expect(searchIcons(all, 'chat circle', null).map((i) => i.name)).toEqual(['chat-circle']);
   });
   it('filters by category, with or without a query', () => {
-    expect(searchIcons(all, '', 'finances').map((i) => i.name)).toEqual(['money', 'wallet']);
+    // With no search, popular icons lead: wallet is in the popular list, money is not.
+    expect(searchIcons(all, '', 'finances').map((i) => i.name)).toEqual(['wallet', 'money']);
     expect(searchIcons(all, 'pulse', 'finances')).toEqual([]);
   });
   it('returns everything for an empty query', () => {

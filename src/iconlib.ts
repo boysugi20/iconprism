@@ -35,6 +35,17 @@ export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'arrows', label: 'Arrows' },
 ];
 
+/** Shown first when nothing is searched. */
+export const POPULAR = [
+  'heart', 'star', 'chat-circle-dots', 'camera', 'music-notes', 'house', 'lightning', 'rocket-launch', 'leaf', 'sun',
+  'moon', 'cloud', 'fire', 'gift', 'shopping-bag', 'wallet', 'coins', 'chart-line-up', 'calendar', 'clock',
+  'map-pin', 'airplane-tilt', 'car', 'bicycle', 'barbell', 'heartbeat', 'pill', 'coffee', 'pizza', 'hamburger',
+  'book-open', 'graduation-cap', 'pencil-simple', 'paint-brush', 'palette', 'image', 'video-camera', 'microphone', 'headphones', 'game-controller',
+  'puzzle-piece', 'trophy', 'crown', 'diamond', 'sparkle', 'magic-wand', 'robot', 'code', 'terminal-window', 'cpu',
+  'shield-check', 'lock-key', 'key', 'fingerprint', 'bell', 'envelope-simple', 'paper-plane-tilt', 'phone', 'user', 'users-three',
+  'smiley', 'paw-print', 'tree', 'flower', 'globe', 'compass', 'mountains', 'umbrella', 'snowflake', 'drop',
+];
+
 let catalog: Promise<IconMeta[]> | null = null;
 
 export function loadCatalog(): Promise<IconMeta[]> {
@@ -95,7 +106,11 @@ export function searchIcons(all: IconMeta[], query: string, category: string | n
   const q = query.trim().toLowerCase().replace(/\s+/g, '-');
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const pool = category ? all.filter((i) => i.categories.includes(category)) : all;
-  if (!q) return pool;
+  if (!q) {
+    // Lead with icons people reach for most, instead of the alphabet's arrows and align tools.
+    const rank = new Map(POPULAR.map((n, i) => [n, i]));
+    return [...pool].sort((a, b) => (rank.get(a.name) ?? 1e6) - (rank.get(b.name) ?? 1e6));
+  }
   const scored: { icon: IconMeta; score: number }[] = [];
   for (const icon of pool) {
     let score = 0;

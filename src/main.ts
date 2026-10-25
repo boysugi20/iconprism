@@ -447,6 +447,9 @@ async function renderDevices(imgs?: IconImages) {
   const stage = $('device-stage');
   stage.dataset.theme = deviceTheme;
   stage.innerHTML = deviceHtml(deviceView, previewImages(imgs ?? (await loadImages(svgs()))), deviceName.value, deviceTheme);
+  // Scale the phone (664 px tall with its frame) to fit the dialog on short screens.
+  const room = stage.clientHeight - 56;
+  stage.style.setProperty('--fit', String(Math.max(0.55, Math.min(1, room / 664))));
 }
 
 function openDevices() {

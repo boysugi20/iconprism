@@ -686,6 +686,7 @@ kbd {
 #ai-settings { width: min(520px, calc(100vw - 32px)); }
 #ai-settings .field span { display: flex; justify-content: space-between; }
 #ai-settings .field a { color: var(--accent); text-transform: none; letter-spacing: 0; }
+#ai-settings-btn { flex: none; width: auto; }
 #ai-settings-btn i { display: grid; }
 @media (max-width: 640px) { .ai-result { grid-template-columns: 1fr; } }
 
@@ -805,8 +806,8 @@ kbd {
 .dv-row { display: flex; flex-wrap: wrap; gap: 28px; justify-content: center; align-items: flex-start; }
 .dv-col { display: grid; gap: 20px; justify-items: center; }
 
-.dv-phone { width: 320px; padding: 12px; border-radius: 52px; background: #0a0a0c; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35), inset 0 0 0 2px #2a2a30; }
-.dv-screen { position: relative; height: clamp(520px, calc(100vh - 230px), 640px); border-radius: 41px; overflow: hidden; background: var(--dv-wall) center / cover no-repeat; color: #fff; display: flex; flex-direction: column; }
+.dv-phone { zoom: var(--fit, 1); width: 320px; padding: 12px; border-radius: 52px; background: #0a0a0c; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35), inset 0 0 0 2px #2a2a30; }
+.dv-screen { position: relative; height: 640px; border-radius: 41px; overflow: hidden; background: var(--dv-wall) center / cover no-repeat; color: #fff; display: flex; flex-direction: column; }
 .dv-status { display: flex; justify-content: space-between; align-items: center; padding: 14px 26px 0; font-size: 14px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
 .dv-status-icons { display: flex; gap: 5px; align-items: center; }
 .dv-status-icons i { width: 14px; height: 9px; border-radius: 2px; background: #fff; opacity: 0.9; }
@@ -820,7 +821,7 @@ kbd {
 .sq-circle { border-radius: 50%; }
 .sq-squircle { border-radius: 34%; }
 .sq-rounded { border-radius: 18%; }
-.dv-label { max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); }
+.dv-label { max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 500; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55), 0 0 1px rgba(0, 0, 0, 0.6); }
 .dv-mine .dv-label { font-weight: 600; }
 .dv-dock { margin: auto 12px 12px; padding: 14px 12px; display: flex; justify-content: space-around; border-radius: 30px; background: rgba(255, 255, 255, 0.28); backdrop-filter: blur(16px); }
 .dv-dock .dv-app { gap: 0; }
@@ -872,7 +873,6 @@ kbd {
 .dv-sr span { color: var(--dv-sub); font-size: 12.5px; }
 @media (max-width: 700px) {
   .device-stage { padding: 14px; }
-  .dv-phone { transform: scale(0.82); transform-origin: top center; margin-bottom: -110px; }
 }
 
 /* Top bar: one height, steady spacing, nothing shrinks below its content. */
