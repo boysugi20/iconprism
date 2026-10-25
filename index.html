@@ -14,38 +14,38 @@
     <header class="bar">
       <a class="brand" href="https://github.com/boysugi20/iconprism" target="_blank" rel="noopener">
         <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 8 58 54H6z" fill="currentColor" /><path d="M32 8 41 54H23z" fill="#0d0d0d" opacity=".2" /></svg>
-        <span>iconprism</span>
+        <span class="brand-name">iconprism</span>
       </a>
-      <div class="bar-group">
+      <div class="bar-group main">
         <button id="undo" class="icon-btn" title="Undo (⌘Z)" data-icon="undo"></button>
         <button id="redo" class="icon-btn" title="Redo (⇧⌘Z)" data-icon="redo"></button>
         <span class="sep"></span>
-        <button id="new" class="btn ghost" title="Start over from a template">New icon</button>
-        <button class="btn ghost with-icon ai-btn" id="ai-btn" title="Describe an icon and let an AI model draw it, or ask it to change the current one"><i data-icon="ai"></i>AI</button>
-        <button class="btn ghost with-icon" id="icons-btn" title="Pick from 1,500 ready-made icons and customise it"><i data-icon="library"></i>Add icon</button>
-        <label class="btn ghost with-icon" title="Add the shapes from an .svg file to the artboard, ready to edit"><i data-icon="shapes"></i>Import SVG<input id="import" type="file" accept=".svg,image/svg+xml" hidden /></label>
+        <button id="new" class="btn ghost with-icon" title="New icon: start over from a template"><i data-icon="filePlus"></i><span class="lbl">New icon</span></button>
+        <button class="btn ghost with-icon ai-btn" id="ai-btn" title="Describe an icon and let an AI model draw it, or ask it to change the current one"><i data-icon="ai"></i><span class="lbl">AI</span></button>
+        <button class="btn ghost with-icon" id="icons-btn" title="Pick from 1,500 ready-made icons and customise it"><i data-icon="library"></i><span class="lbl">Add icon</span></button>
+        <label class="btn ghost with-icon" title="Add the shapes from an .svg file to the artboard, ready to edit"><i data-icon="shapes"></i><span class="lbl">Import SVG</span><input id="import" type="file" accept=".svg,image/svg+xml" hidden /></label>
         <div class="menu-wrap">
-          <button class="btn ghost with-icon" id="ref-btn" aria-haspopup="menu" aria-expanded="false" title="Put a picture under your shapes to trace over. It is never exported."><i data-icon="image"></i>Reference image<span class="dot" hidden></span></button>
+          <button class="btn ghost with-icon" id="ref-btn" aria-haspopup="menu" aria-expanded="false" title="Put a picture under your shapes to trace over. It is never exported."><i data-icon="image"></i><span class="lbl">Reference image</span><span class="dot" hidden></span></button>
           <input id="ref-file" type="file" accept="image/*" hidden />
           <div class="menu ref-menu" id="ref-menu" hidden>
-            <p class="muted small">Sits under your shapes for tracing. Never exported.</p>
-            <div class="row">
-              <label class="check"><input id="ref-show" type="checkbox" checked /><span>Show</span></label>
-              <label class="opacity"><span>Opacity</span><input id="ref-opacity" type="range" min="0.05" max="1" step="0.05" /><output id="ref-opacity-val">40%</output></label>
-            </div>
-            <button class="btn small wide-btn" id="ref-move" title="Drag the image to move it, drag a corner to resize it"><i data-icon="move"></i>Move and resize</button>
-            <div class="row">
-              <button class="btn small" id="ref-fit" title="Show the whole image inside the artboard">Fit inside</button>
-              <button class="btn small" id="ref-fill" title="Cover the whole artboard, cropping the edges">Fill artboard</button>
-            </div>
-            <div class="row">
-              <label class="btn small">Replace<input id="ref-replace" type="file" accept="image/*" hidden /></label>
-              <button class="btn small danger" id="ref-remove">Remove</button>
+            <div class="ref-panel">
+              <p class="muted small">Sits under your shapes for tracing. Never exported.</p>
+              <label class="check"><input id="ref-show" type="checkbox" checked /><span>Show reference image</span></label>
+              <label class="ref-opacity"><span>Opacity</span><input id="ref-opacity" type="range" min="0.05" max="1" step="0.05" /><output id="ref-opacity-val">40%</output></label>
+              <button type="button" class="btn small" id="ref-move" title="Drag the image to move it, drag a corner to resize it"><i data-icon="move"></i>Move and resize</button>
+              <div class="ref-pair">
+                <button type="button" class="btn small" id="ref-fit" title="Show the whole image inside the artboard">Fit inside</button>
+                <button type="button" class="btn small" id="ref-fill" title="Cover the whole artboard, cropping the edges">Fill artboard</button>
+              </div>
+              <div class="ref-pair">
+                <label class="btn small">Replace<input id="ref-replace" type="file" accept="image/*" hidden /></label>
+                <button type="button" class="btn small danger" id="ref-remove">Remove</button>
+              </div>
             </div>
           </div>
         </div>
         <div class="menu-wrap">
-          <button class="btn ghost" data-menu="download-menu" aria-haspopup="menu" aria-expanded="false">Download<i data-icon="chevron"></i></button>
+          <button class="btn ghost with-icon" data-menu="download-menu" aria-haspopup="menu" aria-expanded="false" title="Download"><i data-icon="download"></i><span class="lbl">Download</span><i data-icon="chevron" class="caret"></i></button>
           <div class="menu" id="download-menu" role="menu" hidden>
             <button id="dl-svg" role="menuitem"><i data-icon="shapes"></i><span><b>SVG file</b><small>This icon as an editable vector file</small></span></button>
             <button id="dl-png" role="menuitem"><i data-icon="image"></i><span><b>PNG image, 1024 px</b><small>One large image, e.g. for a store listing</small></span></button>
@@ -53,14 +53,29 @@
           </div>
         </div>
       </div>
+      <div class="menu-wrap more-wrap">
+        <button class="icon-btn" data-menu="more-menu" aria-haspopup="menu" aria-expanded="false" title="Menu" aria-label="Menu" data-icon="menu"></button>
+        <div class="menu" id="more-menu" role="menu" hidden>
+          <button role="menuitem" data-proxy="new"><i data-icon="filePlus"></i><span><b>New icon</b><small>Start over from a template</small></span></button>
+          <button role="menuitem" data-proxy="ai-btn"><i data-icon="ai"></i><span><b>AI</b><small>Describe an icon and let AI draw it</small></span></button>
+          <button role="menuitem" data-proxy="icons-btn"><i data-icon="library"></i><span><b>Add icon</b><small>Pick from 1,500 ready-made icons</small></span></button>
+          <button role="menuitem" data-proxy="import"><i data-icon="shapes"></i><span><b>Import SVG</b><small>Add shapes from an .svg file</small></span></button>
+          <button role="menuitem" data-proxy="ref-btn"><i data-icon="image"></i><span><b>Reference image</b><small>A picture to trace over</small></span></button>
+          <button role="menuitem" data-proxy="preview-btn"><i data-icon="eye"></i><span><b>Preview on devices</b><small>See it on a phone, a tab and the stores</small></span></button>
+          <button role="menuitem" data-proxy="dl-svg"><i data-icon="download"></i><span><b>Download SVG</b><small>Editable vector file</small></span></button>
+          <button role="menuitem" data-proxy="dl-png"><i data-icon="download"></i><span><b>Download PNG, 1024 px</b><small>One large image</small></span></button>
+          <button role="menuitem" data-proxy="help"><i data-icon="help"></i><span><b>Help and shortcuts</b><small>How iconprism works</small></span></button>
+        </div>
+      </div>
       <div class="bar-group right">
-        <button id="snap" class="toggle on" title="Snap to the artboard and other shapes (hold ⌘ or Ctrl to skip)" aria-pressed="true"><i data-icon="magnet"></i>Snap</button>
+        <button id="preview-btn" class="btn ghost with-icon" title="Preview on devices: home screens, browser tab, app stores"><i data-icon="eye"></i><span class="lbl">Preview</span></button>
+        <button id="snap" class="toggle on" title="Snap to the artboard and other shapes (hold ⌘ or Ctrl to skip)" aria-pressed="true"><i data-icon="magnet"></i><span class="lbl">Snap</span></button>
         <button id="help" class="icon-btn" title="Help and shortcuts (?)" data-icon="help"></button>
         <span class="sep"></span>
         <button id="zoom-out" class="icon-btn" title="Zoom out (⌘−)" data-icon="minus"></button>
         <button id="zoom-fit" class="zoom" title="Fit (⇧1)">100%</button>
         <button id="zoom-in" class="icon-btn" title="Zoom in (⌘+)" data-icon="plus"></button>
-        <button id="export" class="btn primary">Export icon set</button>
+        <button id="export" class="btn primary"><span class="lbl-long">Export icon set</span><span class="lbl-short">Export</span></button>
       </div>
     </header>
 
@@ -81,6 +96,12 @@
         </div>
         <div class="drop" id="drop" hidden><span>Drop an SVG to import it, or an image to trace over</span></div>
         <div class="hint" id="hint"></div>
+        <button class="mini-preview" id="mini-preview" title="See your icon on a phone, in a browser tab and in the app stores">
+          <canvas id="mini-ios" width="96" height="96"></canvas>
+          <canvas id="mini-round" width="96" height="96"></canvas>
+          <canvas id="mini-fav" width="32" height="32"></canvas>
+          <span>Preview on devices</span>
+        </button>
         <div class="ref-bar" id="ref-bar" hidden>
           <span><b>Adjusting the reference image.</b> Drag to move, drag a corner to resize, or type a size in the panel.</span>
           <button class="btn small primary" id="ref-done">Done</button>
@@ -204,15 +225,6 @@
           </div>
         </section>
 
-        <section class="block">
-          <h2>Preview</h2>
-          <div class="previews">
-            <figure><canvas id="pv-ios" width="128" height="128"></canvas><figcaption>iOS</figcaption></figure>
-            <figure><canvas id="pv-and" width="128" height="128"></canvas><figcaption>Android</figcaption></figure>
-            <figure><canvas id="pv-round" width="128" height="128"></canvas><figcaption>Round</figcaption></figure>
-            <figure class="tiny"><span><canvas id="pv-32" width="32" height="32"></canvas><canvas id="pv-16" width="16" height="16"></canvas></span><figcaption>Favicon</figcaption></figure>
-          </div>
-        </section>
         </div>
       </aside>
     </main>
@@ -250,6 +262,21 @@
           <div class="templates" id="templates-basic"></div>
         </div>
         <div class="actions"><button value="cancel" class="btn ghost">Cancel</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="device-dialog" class="device-dialog">
+      <form method="dialog">
+        <div class="device-head">
+          <h2>Preview on devices</h2>
+          <div class="seg" id="device-view">
+            <button type="button" data-v="iphone">iPhone</button><button type="button" data-v="android">Android</button><button type="button" data-v="web">Web</button><button type="button" data-v="stores">App stores</button>
+          </div>
+          <label class="field inline"><span>App name</span><input id="device-name" value="My App" maxlength="24" /></label>
+          <div class="seg" id="device-theme"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+        </div>
+        <div class="device-stage" id="device-stage"></div>
+        <div class="actions"><span class="muted small">Previews update as you edit. The app name is also used when you export.</span><button value="cancel" class="btn primary">Done</button></div>
       </form>
     </dialog>
 

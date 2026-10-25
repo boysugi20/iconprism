@@ -5,7 +5,8 @@ import { buildZip, parseSizes, slug } from './export';
 import { TEMPLATES, type Template } from './templates';
 import { buildMessages, chat, EXAMPLES, extractSvg, isReady, listModels, loadSettings, PROVIDERS, sanitizeSvg, saveSettings, suggestModel, type AiSettings } from './ai';
 import { CATEGORIES, loadCatalog, loadWeight, searchIcons, WEIGHTS, withColor, type IconMeta, type IconWeight } from './iconlib';
-import { drawAdaptive, drawFull, loadImages } from './render';
+import { drawAdaptive, drawFull, loadImages, type IconImages } from './render';
+import { deviceHtml, type DeviceView, type PreviewImages } from './devices';
 import { hydrateIcons, icon } from './icons';
 import { addCustomFont, allFonts, fontInfo, loadFont, nearestWeight, WEIGHT_NAMES, type TextSpec } from './text';
 
@@ -410,15 +411,68 @@ async function renderPreviews() {
       ctx.clearRect(0, 0, el.width, el.height);
       ctx.drawImage(c, 0, 0, el.width, el.height);
     };
-    put('pv-ios', drawFull(imgs, 128, 'squircle'));
-    put('pv-and', drawAdaptive(imgs, 128, 'squircle'));
-    put('pv-round', drawAdaptive(imgs, 128, 'circle'));
-    put('pv-32', drawFull(imgs, 32));
-    put('pv-16', drawFull(imgs, 16));
+    put('mini-ios', drawFull(imgs, 96, 'squircle'));
+    put('mini-round', drawAdaptive(imgs, 96, 'circle'));
+    put('mini-fav', drawFull(imgs, 32));
+    if (deviceDialog.open) renderDevices(imgs);
   } catch (err) {
     console.error(err);
   }
 }
+
+// ---------------------------------------------------------------- device preview
+
+const deviceDialog = $<HTMLDialogElement>('device-dialog');
+const deviceName = $<HTMLInputElement>('device-name');
+let deviceView: DeviceView = 'iphone';
+let deviceTheme: 'light' | 'dark' = 'light';
+
+function previewImages(imgs: IconImages): PreviewImages {
+  const url = (c: HTMLCanvasElement) => c.toDataURL('image/png');
+  return {
+    ios: url(drawFull(imgs, 240, 'squircle')),
+    circle: url(drawAdaptive(imgs, 216, 'circle')),
+    squircle: url(drawAdaptive(imgs, 216, 'squircle')),
+    rounded: url(drawAdaptive(imgs, 216, 'rounded')),
+    square: url(drawFull(imgs, 216, 'none', editor.background.enabled ? undefined : '#ffffff')),
+    favicon: url(drawFull(imgs, 32)),
+  };
+}
+
+async function renderDevices(imgs?: IconImages) {
+  $('device-view').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.v === deviceView));
+  $('device-theme').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.v === deviceTheme));
+  const stage = $('device-stage');
+  stage.dataset.theme = deviceTheme;
+  stage.innerHTML = deviceHtml(deviceView, previewImages(imgs ?? (await loadImages(svgs()))), deviceName.value);
+}
+
+function openDevices() {
+  editor.finishPen();
+  deviceName.value = appName();
+  deviceDialog.showModal();
+  renderDevices().catch((err) => toast((err as Error).message));
+}
+
+$('device-view').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+  if (!b) return;
+  deviceView = b.dataset.v as DeviceView;
+  renderDevices();
+});
+$('device-theme').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+  if (!b) return;
+  deviceTheme = b.dataset.v as 'light' | 'dark';
+  renderDevices();
+});
+deviceName.addEventListener('input', () => {
+  // One app name everywhere: the export dialog uses it too.
+  $<HTMLInputElement>('x-name').value = deviceName.value;
+  renderDevices();
+});
+$('mini-preview').addEventListener('click', openDevices);
+$('preview-btn').addEventListener('click', openDevices);
 
 // ---------------------------------------------------------------- commands
 
@@ -1139,6 +1193,16 @@ $('ai-save').addEventListener('click', (e) => {
 });
 
 // ---------------------------------------------------------------- top bar menus
+
+// Phone menu: each item clicks the real control, so behaviour stays in one place.
+// Registered before the generic menu handlers so it can stop them closing a panel it just opened.
+$('more-menu').addEventListener('click', (e) => {
+  const item = (e.target as HTMLElement).closest<HTMLElement>('[data-proxy]');
+  if (!item) return;
+  e.stopImmediatePropagation();
+  closeMenus();
+  document.getElementById(item.dataset.proxy!)?.click();
+});
 
 function closeMenus(except?: HTMLElement) {
   document.querySelectorAll<HTMLElement>('.menu').forEach((m) => {
