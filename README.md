@@ -8,7 +8,8 @@ Free, open source, and it runs entirely in your browser. Nothing is uploaded.
 
 ## What it does
 
-- **Draw:** rectangle (with corner radius), ellipse, polygon, star, line, pen (curves) and text on a 1024 × 1024 artboard.
+- **Draw:** rectangle (with corner radius), ellipse, polygon, star, line and pen (curves) on a 1024 × 1024 artboard.
+- **Text:** type directly on the canvas in 13 bundled fonts or your own .ttf/.otf/.woff, with weight, size, alignment, letter spacing and line height. Text is stored as vector outlines, so it exports exactly, works with Union and Subtract, and stays editable (double-click it).
 - **Edit:** move, resize with handles, rotate, flip, align, reorder, group, and drag individual points and curve handles.
 - **Combine:** union (merge), subtract, intersect and exclude.
 - **Style:** solid or gradient fills, strokes, opacity, and a solid or gradient background.
@@ -42,6 +43,7 @@ Install steps for each platform, including Flutter paths, are in the ZIP's `READ
 | V, A | Select, edit points |
 | R, O, Y, S | Rectangle, ellipse, polygon, star |
 | L, P, T | Line, pen, text |
+| Enter | Edit the selected text; finish typing (Shift+Enter for a new line) |
 | Shift | Square, circle or 45° while drawing; add to selection |
 | Alt | Draw from the centre; break curve handle symmetry |
 | ⌘Z, ⇧⌘Z | Undo, redo |
@@ -63,7 +65,7 @@ npm run dev
 
 `npm run build` writes a static site to `dist/`. Pushing to `main` deploys it to GitHub Pages through `.github/workflows/pages.yml`.
 
-Built with [Paper.js](http://paperjs.org) for vector editing and boolean operations, and [JSZip](https://stuk.github.io/jszip/) for the export.
+Built with [Paper.js](http://paperjs.org) for vector editing and boolean operations, [opentype.js](https://opentype.js.org) for turning text into outlines, and [JSZip](https://stuk.github.io/jszip/) for the export. Bundled fonts come from [Fontsource](https://fontsource.org) under the SIL Open Font License.
 
 ## License
 

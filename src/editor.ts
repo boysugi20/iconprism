@@ -1,9 +1,9 @@
 import paper from 'paper/dist/paper-core';
+import { DEFAULT_TEXT, loadFont, nearestWeight, textPathData, type TextSpec } from './text';
 
 /** Artboard size in project units. Everything is designed at 1024 x 1024. */
 export const ART = 1024;
 export const ACCENT = '#e4ff4f';
-const TEXT_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const STORAGE_KEY = 'iconprism:doc';
 
 export type ToolName = 'select' | 'node' | 'rect' | 'ellipse' | 'polygon' | 'star' | 'line' | 'pen' | 'text';
@@ -65,6 +65,10 @@ function mods(e: paper.ToolEvent) {
   return { shift: !!n?.shiftKey, alt: !!n?.altKey };
 }
 
+export function isText(item: paper.Item | null | undefined): item is paper.CompoundPath {
+  return item instanceof paper.CompoundPath && !!item.data?.text;
+}
+
 export const solid = (color: string): Fill => ({ type: 'solid', color, color2: '#ffffff', angle: 90 });
 
 /** Paints an item with a fill spec and remembers the spec so the panel can show it again. */
@@ -75,7 +79,8 @@ export function applyFill(item: paper.Item, f: Fill) {
   } else if (f.type === 'solid') {
     item.fillColor = new paper.Color(f.color);
   } else {
-    const b = item.bounds;
+    // Items that keep their own matrix (text) take gradient points in local space.
+    const b = item.applyMatrix ? item.bounds : item.internalBounds;
     const a = (f.angle * Math.PI) / 180;
     const dir = new paper.Point(Math.cos(a), Math.sin(a));
     const half = (Math.abs(dir.x) * b.width + Math.abs(dir.y) * b.height) / 2;
@@ -129,6 +134,10 @@ export class Editor {
   onSelect = () => {};
   onTool = () => {};
   onView = () => {};
+  /** Text tool click or double-click on text: the UI opens the on-canvas editor. */
+  onEditText = (_req: { item: paper.CompoundPath | null; at: paper.Point }) => {};
+  onNotice = (_msg: string) => {};
+  newText: TextSpec = { ...DEFAULT_TEXT };
 
   private board: paper.Layer;
   private bgLayer: paper.Layer;
@@ -640,14 +649,61 @@ export class Editor {
   }
 
   private textDown(e: paper.ToolEvent) {
-    const s = window.prompt('Text', 'A');
-    if (!s) return;
-    const t = new paper.PointText({ point: e.point, content: s, fontFamily: TEXT_FONT, fontWeight: 'bold', fontSize: 320, justification: 'center' });
-    t.position = e.point;
-    applyFill(t, this.newFill.type === 'none' ? solid('#ffffff') : this.newFill);
-    this.setTool('select');
-    this.select([t]);
+    const hit = this.topItemAt(e.point);
+    this.onEditText(isText(hit) ? { item: hit, at: e.point } : { item: null, at: e.point });
+  }
+
+  /**
+   * Creates or rewrites a text item from its spec. Text keeps its own matrix
+   * (applyMatrix off), so moves, scales and rotations survive re-editing.
+   */
+  async writeText(item: paper.CompoundPath | null, at: paper.Point, spec: TextSpec): Promise<paper.CompoundPath | null> {
+    if (!spec.content.trim()) {
+      if (item) {
+        item.remove();
+        this.select([]);
+        this.commit();
+      }
+      return null;
+    }
+    spec = { ...spec, weight: nearestWeight(spec.font, spec.weight) };
+    const { font } = await loadFont(spec.font, spec.weight);
+    const d = textPathData(font, spec);
+    if (!item || !item.parent) {
+      this.content.activate();
+      item = new paper.CompoundPath({ applyMatrix: false });
+      item.translate(at);
+      item.pathData = d;
+      applyFill(item, this.newFill.type === 'none' ? solid('#ffffff') : this.newFill);
+    } else {
+      item.pathData = d;
+      if (item.data.fill?.type === 'linear') applyFill(item, item.data.fill);
+    }
+    item.data.text = { ...spec };
+    if (this.tool !== 'select') this.setTool('select');
+    this.select([item]);
     this.commit();
+    return item;
+  }
+
+  /** Applies a text setting to the selected text, or to new text when none is selected. */
+  async updateText(patch: Partial<TextSpec>) {
+    const items = this.selection.filter(isText);
+    if (!items.length) {
+      this.newText = { ...this.newText, ...patch };
+      return;
+    }
+    for (const it of items) await this.writeText(it, it.position, { ...it.data.text, ...patch });
+    this.select(items);
+  }
+
+  /** Bakes text into a plain shape: no longer editable as text, but its points are. */
+  convertToShape(items = this.selection.filter(isText)) {
+    for (const it of items) {
+      delete it.data.text;
+      it.applyMatrix = true;
+    }
+    if (items.length) this.commit();
   }
 
   // Node editing: drag points and handles, click a path edge to add a point.
@@ -666,6 +722,12 @@ export class Editor {
     let owner: paper.Item = hit.item;
     while (owner.parent && owner.parent !== this.content) owner = owner.parent;
     if (!this.selection.includes(owner)) this.select(mods(e).shift ? [...this.selection, owner] : [owner]);
+    if (isText(owner)) {
+      this.convertToShape([owner]);
+      this.select(this.selection);
+      this.onNotice('Text turned into a shape so you can edit its points.');
+      return;
+    }
     if (hit.type === 'segment') {
       if (!mods(e).shift && !hit.segment.selected) this.clearSegments();
       hit.segment.selected = mods(e).shift ? !hit.segment.selected : true;
@@ -697,7 +759,9 @@ export class Editor {
     if (this.tool === 'pen') { this.finishPen(); return; }
     if (this.tool === 'select') {
       const item = this.topItemAt(pt);
-      if (item && !(item instanceof paper.PointText)) {
+      if (isText(item)) {
+        this.onEditText({ item, at: pt });
+      } else if (item && !(item instanceof paper.PointText)) {
         this.select([item]);
         this.setTool('node');
       }
@@ -767,6 +831,7 @@ export class Editor {
     }
     base.parent.insertChild(base.index, result);
     result.data = { ...base.data };
+    delete result.data.text;
     if (base.data.fill?.type === 'linear') applyFill(result, base.data.fill);
     items.forEach((i) => i.remove());
     this.select([result]);
@@ -990,6 +1055,11 @@ export class Editor {
       e.preventDefault();
       if (this.tool === 'node' && this.selectedPaths().some((p) => p.segments.some((s) => s.selected))) this.deleteSegments();
       else this.remove();
+      return;
+    }
+    if (e.key === 'Enter' && this.selection.length === 1 && isText(this.selection[0]) && this.tool === 'select') {
+      e.preventDefault();
+      this.onEditText({ item: this.selection[0], at: this.selection[0].position });
       return;
     }
     if (e.key === 'Enter') { this.finishPen(); if (this.tool === 'node') this.setTool('select'); return; }

@@ -1,9 +1,10 @@
 import './style.css';
 import paper from 'paper/dist/paper-core';
-import { Editor, type Align, type BooleanOp, type Fill, type ToolName } from './editor';
+import { Editor, isText, type Align, type BooleanOp, type Fill, type ToolName } from './editor';
 import { buildZip, slug } from './export';
 import { drawAdaptive, drawFull, loadImages } from './render';
 import { hydrateIcons, icon } from './icons';
+import { addCustomFont, allFonts, fontInfo, loadFont, nearestWeight, WEIGHT_NAMES, type TextSpec } from './text';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -16,7 +17,7 @@ const TOOLS: { id: ToolName; label: string; key: string; hint: string }[] = [
   { id: 'star', label: 'Star', key: 'S', hint: 'Drag out from the centre. Set the number of points in Shape tools.' },
   { id: 'line', label: 'Line', key: 'L', hint: 'Drag to draw. Shift snaps to 45°. Uses the stroke colour and width.' },
   { id: 'pen', label: 'Pen', key: 'P', hint: 'Click for corners, drag for curves. Click the first point to close, Enter to finish.' },
-  { id: 'text', label: 'Text', key: 'T', hint: 'Click to place text. Text exports with a system font.' },
+  { id: 'text', label: 'Text', key: 'T', hint: 'Click to type. Enter finishes, Shift+Enter adds a line, Esc cancels. Double-click text to edit it.' },
 ];
 
 const canvas = $<HTMLCanvasElement>('canvas');
@@ -99,6 +100,175 @@ function fillControl(root: HTMLElement, onInput: (f: Fill, final: boolean) => vo
 const fill = fillControl($('fill'), (f, final) => editor.setFill(f, final));
 const bgFill = fillControl($('bg-fill'), (f, final) => editor.setBackground({ enabled: editor.background.enabled, fill: f }, final));
 
+// ---------------------------------------------------------------- text
+
+const textEl = $('text-edit');
+const textBlock = $('text-block');
+const tFont = $<HTMLSelectElement>('t-font');
+const tWeight = $<HTMLSelectElement>('t-weight');
+const tSize = $<HTMLInputElement>('t-size');
+const tSpacing = $<HTMLInputElement>('t-spacing');
+const tLine = $<HTMLInputElement>('t-line');
+const tAlign = $('t-align');
+
+/** The text being typed on the canvas, if any. */
+let editing: { item: paper.CompoundPath | null; at: paper.Point; spec: TextSpec } | null = null;
+
+function selectedText() {
+  return editor.selection.filter(isText);
+}
+
+function currentTextSpec(): TextSpec {
+  return editing?.spec ?? selectedText()[0]?.data.text ?? editor.newText;
+}
+
+function syncTextPanel() {
+  const show = editor.tool === 'text' || !!editing || selectedText().length > 0;
+  textBlock.hidden = !show;
+  if (!show) return;
+  const spec = currentTextSpec();
+  $('text-scope').textContent = editing ? 'editing' : selectedText().length ? 'selection' : 'new text';
+  tFont.innerHTML = allFonts().map((f) => `<option value="${f.id}">${f.name}</option>`).join('');
+  tFont.value = spec.font;
+  const weights = fontInfo(spec.font)?.weights ?? [400];
+  tWeight.innerHTML = weights.map((w) => `<option value="${w}">${WEIGHT_NAMES[w] ?? w}</option>`).join('');
+  tWeight.value = String(nearestWeight(spec.font, spec.weight));
+  tSize.value = String(spec.size);
+  tSpacing.value = String(spec.spacing);
+  tLine.value = String(spec.lineHeight);
+  tAlign.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.v === spec.align));
+  $<HTMLButtonElement>('t-convert').hidden = !selectedText().length || !!editing;
+}
+
+/** Positions and styles the on-canvas editor to match the outlines it will produce. */
+async function styleTextEditor() {
+  if (!editing) return;
+  const ed = editing;
+  const { font, family } = await loadFont(ed.spec.font, ed.spec.weight);
+  if (editing !== ed) return;
+  const scale = paper.view.zoom * (ed.item ? Math.abs(ed.item.matrix.scaling.y) : 1);
+  const px = ed.spec.size * scale;
+  const asc = font.ascender / font.unitsPerEm;
+  const desc = -font.descender / font.unitsPerEm;
+  const lineBox = ed.spec.lineHeight * px;
+  const p = paper.view.projectToView(ed.at);
+  const fill = ed.item ? ed.item.data.fill : editor.newFill;
+  const shift = ed.spec.align === 'center' ? '-50%' : ed.spec.align === 'right' ? '-100%' : '0';
+  Object.assign(textEl.style, {
+    fontFamily: `"${family}"`,
+    fontWeight: String(nearestWeight(ed.spec.font, ed.spec.weight)),
+    fontSize: `${px}px`,
+    lineHeight: `${lineBox}px`,
+    letterSpacing: `${ed.spec.spacing / 1000}em`,
+    textAlign: ed.spec.align,
+    color: !fill || fill.type === 'none' ? '#ffffff' : fill.color,
+    left: `${p.x}px`,
+    top: `${p.y - (lineBox - (asc + desc) * px) / 2 - asc * px}px`,
+    transform: `translateX(${shift})`,
+  });
+}
+
+async function openTextEditor(req: { item: paper.CompoundPath | null; at: paper.Point }) {
+  // A click outside while typing only finishes the current text.
+  if (editing) { await commitText(); return; }
+  const spec: TextSpec = req.item ? { ...req.item.data.text } : { ...editor.newText, content: '' };
+  editing = { item: req.item, at: req.item ? req.item.localToGlobal(new paper.Point(0, 0)) : req.at, spec };
+  if (req.item) req.item.visible = false;
+  editor.select([]);
+  textEl.textContent = spec.content;
+  try {
+    await styleTextEditor();
+  } catch (err) {
+    cancelText();
+    toast((err as Error).message);
+    return;
+  }
+  textEl.hidden = false;
+  textEl.focus();
+  const range = document.createRange();
+  range.selectNodeContents(textEl);
+  const sel = getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+  syncTextPanel();
+}
+
+function closeTextEditor() {
+  const ed = editing;
+  editing = null;
+  textEl.hidden = true;
+  if (ed?.item) ed.item.visible = true;
+  return ed;
+}
+
+async function commitText() {
+  const content = textEl.innerText.replace(/\n$/, '');
+  const ed = closeTextEditor();
+  if (!ed) return;
+  if (!ed.item) editor.newText = { ...ed.spec, content: '' };
+  try {
+    await editor.writeText(ed.item, ed.at, { ...ed.spec, content });
+  } catch (err) {
+    toast((err as Error).message);
+  }
+  syncPanel();
+}
+
+function cancelText() {
+  const ed = closeTextEditor();
+  if (ed?.item) editor.select([ed.item]);
+  paper.view.update();
+  syncPanel();
+}
+
+textEl.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitText(); }
+  if (e.key === 'Escape') { e.preventDefault(); cancelText(); }
+});
+textEl.addEventListener('focusout', (e) => {
+  // Tweaking the Text panel keeps the editor open.
+  if ((e.relatedTarget as HTMLElement | null)?.closest('#text-block')) return;
+  if (editing) commitText();
+});
+
+function setText(patch: Partial<TextSpec>) {
+  if (patch.font) patch.weight = nearestWeight(patch.font, patch.weight ?? currentTextSpec().weight);
+  if (editing) {
+    editing.spec = { ...editing.spec, ...patch };
+    styleTextEditor().catch((err) => toast(err.message));
+    syncTextPanel();
+    textEl.focus();
+    return;
+  }
+  editor.updateText(patch).then(syncPanel, (err) => toast(err.message));
+  syncTextPanel();
+}
+
+tFont.addEventListener('change', () => setText({ font: tFont.value }));
+tWeight.addEventListener('change', () => setText({ weight: Number(tWeight.value) }));
+tSize.addEventListener('change', () => setText({ size: Math.max(8, Number(tSize.value) || 8) }));
+tSpacing.addEventListener('change', () => setText({ spacing: Number(tSpacing.value) || 0 }));
+tLine.addEventListener('change', () => setText({ lineHeight: Math.max(0.5, Number(tLine.value) || 1) }));
+tAlign.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+  if (b) setText({ align: b.dataset.v as TextSpec['align'] });
+});
+$<HTMLInputElement>('t-upload').addEventListener('change', async (e) => {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    const id = await addCustomFont(file);
+    setText({ font: id, weight: fontInfo(id)!.weights[0] });
+    toast(`Added ${fontInfo(id)!.name.replace(' (uploaded)', '')}. Re-upload it after a reload to edit this text.`);
+  } catch {
+    toast('Could not read that font. Use .ttf, .otf or .woff.');
+  }
+});
+$('t-convert').addEventListener('click', () => { editor.convertToShape(); syncPanel(); });
+
 // ---------------------------------------------------------------- stroke + layout
 
 const sOn = $<HTMLInputElement>('s-on');
@@ -176,6 +346,7 @@ function syncPanel() {
   opacity.value = String(st.opacity);
   opacity.disabled = !n;
 
+  syncTextPanel();
   bgOn.checked = editor.background.enabled;
   bgFill.set(editor.background.fill);
   $<HTMLButtonElement>('undo').disabled = !editor.canUndo;
@@ -324,8 +495,13 @@ const zoomLabel = $('zoom-fit');
 editor.onChange = () => { syncPanel(); schedulePreview(); };
 editor.onLive = () => { syncPanel(); schedulePreview(); };
 editor.onSelect = syncPanel;
-editor.onTool = syncTool;
-editor.onView = () => (zoomLabel.textContent = `${Math.round(paper.view.zoom * 100)}%`);
+editor.onTool = () => { syncTool(); syncTextPanel(); };
+editor.onView = () => {
+  zoomLabel.textContent = `${Math.round(paper.view.zoom * 100)}%`;
+  if (editing) styleTextEditor();
+};
+editor.onEditText = (req) => { openTextEditor(req); };
+editor.onNotice = toast;
 
 const stage = $('stage');
 new ResizeObserver(([entry]) => {
