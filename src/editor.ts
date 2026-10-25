@@ -59,6 +59,12 @@ function handlePoint(b: paper.Rectangle, h: Handle): paper.Point {
   }
 }
 
+/** Modifier keys from the native mouse event; Paper's own key tracking can miss key-ups. */
+function mods(e: paper.ToolEvent) {
+  const n = (e as unknown as { event?: MouseEvent }).event;
+  return { shift: !!n?.shiftKey, alt: !!n?.altKey };
+}
+
 export const solid = (color: string): Fill => ({ type: 'solid', color, color2: '#ffffff', angle: 90 });
 
 /** Paints an item with a fill spec and remembers the spec so the panel can show it again. */
@@ -440,7 +446,7 @@ export class Editor {
         const s = d.segment;
         const v = e.point.subtract(s.point);
         const other = d.which === 'out' ? s.handleIn : s.handleOut;
-        const mirror = !e.modifiers.alt && !other.isZero() ? v.normalize(-other.length) : other;
+        const mirror = !mods(e).alt && !other.isZero() ? v.normalize(-other.length) : other;
         if (d.which === 'out') { s.handleOut = v; s.handleIn = mirror; } else { s.handleIn = v; s.handleOut = mirror; }
         this.onLive();
         return;
@@ -509,7 +515,7 @@ export class Editor {
       return;
     }
     const item = this.topItemAt(e.point);
-    const shift = e.modifiers.shift;
+    const shift = mods(e).shift;
     if (item) {
       if (shift) {
         this.select(this.selection.includes(item) ? this.selection.filter((i) => i !== item) : [...this.selection, item]);
@@ -529,7 +535,7 @@ export class Editor {
     const vert = d.handle.includes('n') || d.handle.includes('s');
     let fx = horiz && hp.x !== d.anchor.x ? (e.point.x - d.anchor.x) / (hp.x - d.anchor.x) : 1;
     let fy = vert && hp.y !== d.anchor.y ? (e.point.y - d.anchor.y) / (hp.y - d.anchor.y) : 1;
-    if (e.modifiers.shift) {
+    if (mods(e).shift) {
       const f = horiz && vert ? Math.max(Math.abs(fx), Math.abs(fy)) : Math.abs(horiz ? fx : fy);
       fx = Math.sign(fx || 1) * f;
       fy = Math.sign(fy || 1) * f;
@@ -553,7 +559,7 @@ export class Editor {
     let item: paper.Item;
     if (this.tool === 'line') {
       if (click) to = from.add(new paper.Point(256, 0));
-      if (e.modifiers.shift) {
+      if (mods(e).shift) {
         const v = to.subtract(from);
         v.angle = Math.round(v.angle / 45) * 45;
         to = from.add(v);
@@ -569,13 +575,13 @@ export class Editor {
     } else {
       let w = to.x - from.x;
       let h = to.y - from.y;
-      if (e.modifiers.shift) {
+      if (mods(e).shift) {
         const s = Math.max(Math.abs(w), Math.abs(h));
         w = Math.sign(w || 1) * s;
         h = Math.sign(h || 1) * s;
       }
       let rect = new paper.Rectangle(from, from.add(new paper.Point(w, h)));
-      if (e.modifiers.alt && !click) rect = new paper.Rectangle(from.subtract(new paper.Point(w, h)), from.add(new paper.Point(w, h)));
+      if (mods(e).alt && !click) rect = new paper.Rectangle(from.subtract(new paper.Point(w, h)), from.add(new paper.Point(w, h)));
       if (click) rect = new paper.Rectangle(from.subtract(new paper.Point(128, 128)), new paper.Size(256, 256));
       if (rect.width < 1 || rect.height < 1) { d.item = null; return; }
       item = this.tool === 'ellipse'
@@ -659,10 +665,10 @@ export class Editor {
     if (!hit) { this.select([]); return; }
     let owner: paper.Item = hit.item;
     while (owner.parent && owner.parent !== this.content) owner = owner.parent;
-    if (!this.selection.includes(owner)) this.select([owner]);
+    if (!this.selection.includes(owner)) this.select(mods(e).shift ? [...this.selection, owner] : [owner]);
     if (hit.type === 'segment') {
-      if (!e.modifiers.shift && !hit.segment.selected) this.clearSegments();
-      hit.segment.selected = e.modifiers.shift ? !hit.segment.selected : true;
+      if (!mods(e).shift && !hit.segment.selected) this.clearSegments();
+      hit.segment.selected = mods(e).shift ? !hit.segment.selected : true;
       this.drag = { kind: 'segments', moved: false };
     } else if (hit.type === 'handle-in' || hit.type === 'handle-out') {
       this.drag = { kind: 'handle', segment: hit.segment, which: hit.type === 'handle-in' ? 'in' : 'out' };

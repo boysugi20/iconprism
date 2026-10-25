@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "flat-type-hierarchy",
+        "value": "*",
+        "files": [
+          "index.html"
+        ],
+        "createdAt": "2026-10-25T04:24:43.331Z",
+        "reason": "agent decision: dense editor tool UI (13px panel text, 15px brand, 18px dialog title) intentionally uses a flat type scale; no marketing headings"
+      }
+    ]
+  }
+}
