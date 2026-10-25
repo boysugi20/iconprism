@@ -353,8 +353,8 @@ const round = (n: number) => Math.round(n * 10) / 10;
 function syncPanel() {
   const n = editor.selection.length;
   const kind = n === 1 ? editor.selection[0].className.replace('PointText', 'Text').replace('CompoundPath', 'Compound shape').replace('Path', 'Shape') : 'items';
-  $('sel-title').textContent = n === 0 ? 'Nothing selected' : n === 1 ? kind : `${n} items`;
-  $('sel-block').classList.toggle('empty', n === 0);
+  $('sel-title').textContent = editor.refEditing ? 'Reference image' : n === 0 ? 'Nothing selected' : n === 1 ? kind : `${n} items`;
+  $('sel-block').classList.toggle('empty', n === 0 && !editor.refEditing);
   $('fill-scope').textContent = n ? 'selection' : 'new shapes';
 
   const b = editor.selBounds();
@@ -362,7 +362,7 @@ function syncPanel() {
     g.disabled = !b;
     if (document.activeElement !== g) g.value = b ? String(round([b.x, b.y, b.width, b.height][i])) : '';
   });
-  rot.disabled = !b;
+  rot.disabled = !b || editor.refEditing;
   if (document.activeElement !== rot) rot.value = b ? String(editor.rotation) : '';
 
   const st = editor.currentStyle();
@@ -561,12 +561,20 @@ async function drawTemplateThumbs() {
         ? `<circle cx="32" cy="32" r="${32 * t.plate.size}" fill="${t.plate.color}"/>`
         : `<rect x="${32 - 32 * t.plate.size}" y="${32 - 32 * t.plate.size}" width="${64 * t.plate.size}" height="${64 * t.plate.size}" rx="${14 * t.plate.size}" fill="${t.plate.color}"/>`
       : '';
-    // Phosphor glyphs fill about 82% of their 256 viewBox.
-    const size = (64 * t.icon.fit) / 0.82;
+    // Same placement as the editor: the icon's real bounds fill `fit` of the square, centred.
+    // The icon colour goes on a wrapping <g>, since Phosphor puts it on the root <svg> we strip.
     el.innerHTML =
       `<defs><linearGradient id="tg-${t.id}" x2="0" y2="1"><stop stop-color="${bg.color}"/><stop offset="1" stop-color="${bg.color2}"/></linearGradient></defs>` +
       `<rect width="64" height="64" rx="14" fill="url(#tg-${t.id})"/>${plate}` +
-      `<svg x="${32 - size / 2}" y="${32 - size / 2}" width="${size}" height="${size}" viewBox="0 0 256 256">${svgInner(withColor(svg, t.icon.color))}</svg>`;
+      `<svg width="64" height="64" viewBox="0 0 256 256"><g fill="${t.icon.color}">${svgInner(svg)}</g></svg>`;
+    const inner = el.lastElementChild as SVGSVGElement;
+    const box = (inner.firstElementChild as SVGGElement).getBBox();
+    if (box.width && box.height) {
+      const side = Math.max(box.width, box.height) / t.icon.fit;
+      const cx = box.x + box.width / 2;
+      const cy = box.y + box.height / 2;
+      inner.setAttribute('viewBox', `${cx - side / 2} ${cy - side / 2} ${side} ${side}`);
+    }
   }
 }
 
@@ -828,7 +836,10 @@ function syncReference() {
   $('ref-btn').querySelector<HTMLElement>('.dot')!.hidden = !has;
   if (!has) closeMenus();
   refOpacity.value = String(editor.reference.opacity);
+  $('ref-opacity-val').textContent = `${Math.round(editor.reference.opacity * 100)}%`;
   refShow.checked = editor.reference.visible;
+  $('ref-bar').hidden = !editor.refEditing;
+  $('ref-move').classList.toggle('on', editor.refEditing);
 }
 
 function saveReference() {
@@ -854,10 +865,22 @@ async function setReferenceFile(file: File | undefined) {
   if (!file.type.startsWith('image/')) { toast('Pick an image file (PNG, JPG, WebP, GIF or SVG).'); return; }
   editor.setReference(await readImage(file));
   saveReference();
-  toast('Reference added. It sits under your shapes and is never exported.');
+  // Open the controls right away so opacity, move and resize are easy to find.
+  const menu = $('ref-menu');
+  closeMenus(menu);
+  menu.hidden = false;
+  $('ref-btn').setAttribute('aria-expanded', 'true');
 }
 
 editor.onReference = syncReference;
+editor.onReferenceChange = saveReference;
+$('ref-move').addEventListener('click', () => {
+  closeMenus();
+  editor.editReference(!editor.refEditing);
+});
+$('ref-done').addEventListener('click', () => editor.editReference(false));
+$('ref-fit').addEventListener('click', () => editor.fitReference('contain'));
+$('ref-fill').addEventListener('click', () => editor.fitReference('cover'));
 for (const id of ['ref-file', 'ref-replace']) {
   $<HTMLInputElement>(id).addEventListener('change', (e) => {
     const input = e.target as HTMLInputElement;
@@ -874,7 +897,7 @@ try {
   const saved = JSON.parse(localStorage.getItem(REF_KEY) ?? 'null');
   if (saved?.src) {
     editor.setReferenceStyle(saved.opacity ?? 0.4, saved.visible ?? true);
-    editor.setReference(saved.src);
+    editor.setReference(saved.src, Array.isArray(saved.matrix) ? saved.matrix : null);
   }
 } catch { /* ignore a broken saved reference */ }
 syncReference();
@@ -958,7 +981,7 @@ $('ref-btn').addEventListener('click', (e) => {
 const zoomLabel = $('zoom-fit');
 editor.onChange = () => { syncPanel(); schedulePreview(); };
 editor.onLive = () => { syncPanel(); schedulePreview(); };
-editor.onSelect = syncPanel;
+editor.onSelect = () => { syncPanel(); syncReference(); };
 editor.onTool = () => { syncTool(); syncTextPanel(); };
 editor.onView = () => {
   zoomLabel.textContent = `${Math.round(paper.view.zoom * 100)}%`;

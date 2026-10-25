@@ -163,7 +163,9 @@ export class Editor {
   snapOn = true;
   /** False on a first visit, so the UI can offer templates. */
   hadSavedDoc = false;
-  reference: { src: string | null; opacity: number; visible: boolean } = { src: null, opacity: 0.4, visible: true };
+  reference: { src: string | null; opacity: number; visible: boolean; matrix: number[] | null } = { src: null, opacity: 0.4, visible: true, matrix: null };
+  /** True while the reference image is being moved or resized instead of the artwork. */
+  refEditing = false;
   private penPath: paper.Path | null = null;
   private history: string[] = [];
   private hIndex = -1;
@@ -422,9 +424,20 @@ export class Editor {
     return this.selection.slice().sort((a, b) => a.index - b.index);
   }
 
+  private get refRaster(): paper.Raster | null {
+    return (this.refLayer.firstChild as paper.Raster | null) ?? null;
+  }
+
+  /** What move, resize and the position fields act on: the reference image while it is being adjusted. */
+  private get targets(): paper.Item[] {
+    const r = this.refRaster;
+    return this.refEditing && r ? [r] : this.selection;
+  }
+
   selBounds(): paper.Rectangle | null {
-    if (!this.selection.length) return null;
-    return this.selection.map((i) => i.bounds).reduce((a, b) => a.unite(b));
+    const t = this.targets;
+    if (!t.length) return null;
+    return t.map((i) => i.bounds).reduce((a, b) => a.unite(b));
   }
 
   private topItemAt(pt: paper.Point): paper.Item | null {
@@ -436,7 +449,7 @@ export class Editor {
   }
 
   private handleAt(pt: paper.Point): Handle | null {
-    const b = this.tool === 'select' ? this.selBounds() : null;
+    const b = this.tool === 'select' || this.refEditing ? this.selBounds() : null;
     if (!b) return null;
     const r = 7 / paper.view.zoom;
     return HANDLES.find((h) => handlePoint(b, h).getDistance(pt) <= r) ?? null;
@@ -447,9 +460,9 @@ export class Editor {
     const ui = this.ui;
     ui.removeChildren();
     const z = paper.view.zoom;
-    const b = this.tool === 'select' ? this.selBounds() : null;
+    const b = this.tool === 'select' || this.refEditing ? this.selBounds() : null;
     if (b) {
-      if (this.selection.length > 1)
+      if (this.targets.length > 1)
         for (const it of this.selection)
           new paper.Path.Rectangle({ rectangle: it.bounds, parent: ui, strokeColor: ACCENT, strokeWidth: 1, strokeScaling: false, opacity: 0.5 });
       new paper.Path.Rectangle({ rectangle: b, parent: ui, strokeColor: ACCENT, strokeWidth: 1.5, strokeScaling: false });
@@ -479,6 +492,7 @@ export class Editor {
   // ---------------------------------------------------------------- tools
 
   setTool(t: ToolName) {
+    if (this.refEditing && t !== 'select') this.editReference(false);
     if (this.tool === 'pen' && t !== 'pen') this.finishPen();
     this.tool = t;
     paper.project.deselectAll();
@@ -535,7 +549,7 @@ export class Editor {
         if (this.snapOn && !mods(e).noSnap) {
           const target = d.start.clone();
           target.point = target.point.add(d.raw);
-          const lines = this.snapLines(new Set(this.selection));
+          const lines = this.snapLines(new Set(this.targets));
           const sx = this.snapAxis([target.left, target.center.x, target.right], lines.x);
           const sy = this.snapAxis([target.top, target.center.y, target.bottom], lines.y);
           offset = offset.add(new paper.Point(sx?.delta ?? 0, sy?.delta ?? 0));
@@ -543,7 +557,7 @@ export class Editor {
           if (sy) this.snapGuides.y.push(sy.line);
         }
         const step = offset.subtract(d.applied);
-        this.selection.forEach((i) => i.translate(step));
+        this.targets.forEach((i) => i.translate(step));
         d.applied = offset;
         d.moved = true;
         this.drawUI();
@@ -593,9 +607,10 @@ export class Editor {
     if (!d) return;
     switch (d.kind) {
       case 'move':
-        if (d.moved) this.commit();
+        if (d.moved) this.refEditing ? this.saveReference() : this.commit();
         return;
       case 'scale':
+        return this.refEditing ? this.saveReference() : this.commit();
       case 'handle':
         return this.commit();
       case 'segments':
@@ -640,6 +655,11 @@ export class Editor {
       this.drag = { kind: 'scale', handle: h, anchor: handlePoint(b, OPPOSITE[h]), start: b.clone(), fx: 1, fy: 1 };
       return;
     }
+    if (this.refEditing) {
+      // Only the reference image responds; the artwork stays put.
+      if (b?.contains(e.point)) this.drag = { kind: 'move', moved: false };
+      return;
+    }
     const item = this.topItemAt(e.point);
     const shift = mods(e).shift;
     if (item) {
@@ -662,7 +682,7 @@ export class Editor {
     const vert = d.handle.includes('n') || d.handle.includes('s');
     let fx = horiz && hp.x !== d.anchor.x ? (e.point.x - d.anchor.x) / (hp.x - d.anchor.x) : 1;
     let fy = vert && hp.y !== d.anchor.y ? (e.point.y - d.anchor.y) / (hp.y - d.anchor.y) : 1;
-    if (mods(e).shift) {
+    if (mods(e).shift || this.refEditing) {
       // A flat selection (a horizontal or vertical line) scales by its one real axis.
       const flatX = !d.start.width;
       const flatY = !d.start.height;
@@ -675,7 +695,7 @@ export class Editor {
     const clamp = (v: number) => (Math.abs(v) < 0.01 ? 0.01 * Math.sign(v || 1) : v);
     fx = clamp(fx);
     fy = clamp(fy);
-    this.selection.forEach((i) => i.scale(fx / d.fx, fy / d.fy, d.anchor));
+    this.targets.forEach((i) => i.scale(fx / d.fx, fy / d.fy, d.anchor));
     d.fx = fx;
     d.fy = fy;
     this.drawUI();
@@ -998,13 +1018,17 @@ export class Editor {
 
   // ---------------------------------------------------------------- reference image
 
-  setReference(src: string | null) {
+  /** Shows a reference image. A saved matrix restores its position and size; otherwise it fits the artboard. */
+  setReference(src: string | null, matrix: number[] | null = null) {
+    if (this.refEditing) this.editReference(false);
     this.reference.src = src;
+    this.reference.matrix = matrix;
     this.refLayer.removeChildren();
     if (src) {
       const raster = new paper.Raster({ source: src, parent: this.refLayer });
       raster.onLoad = () => {
-        raster.fitBounds(new paper.Rectangle(0, 0, ART, ART));
+        if (matrix?.length === 6) raster.matrix = new paper.Matrix(matrix);
+        else this.fitReference('contain');
         this.applyReference();
       };
     }
@@ -1017,12 +1041,46 @@ export class Editor {
     this.applyReference();
   }
 
+  /** 'contain' shows the whole image inside the artboard; 'cover' fills the artboard edge to edge. */
+  fitReference(mode: 'contain' | 'cover') {
+    const r = this.refRaster;
+    if (!r || !r.width || !r.height) return;
+    r.matrix = new paper.Matrix();
+    const s = mode === 'contain' ? Math.min(ART / r.width, ART / r.height) : Math.max(ART / r.width, ART / r.height);
+    r.scale(s);
+    r.position = new paper.Point(ART / 2, ART / 2);
+    this.saveReference();
+    this.drawUI();
+  }
+
+  /** Turns move-and-resize mode for the reference image on or off. */
+  editReference(on: boolean) {
+    if (on && !this.refRaster) return;
+    if (on === this.refEditing) return;
+    this.refEditing = on;
+    if (on) {
+      this.reference.visible = true;
+      if (this.tool !== 'select') this.setTool('select');
+      this.select([]);
+    }
+    this.applyReference();
+    this.drawUI();
+    this.onSelect();
+  }
+
+  private saveReference() {
+    this.reference.matrix = this.refRaster ? this.refRaster.matrix.values : null;
+    this.onReferenceChange();
+  }
+
   private applyReference() {
     this.refLayer.opacity = this.reference.opacity;
     this.refLayer.visible = this.reference.visible && !!this.reference.src;
     this.onReference();
   }
 
+  /** The reference image moved or resized; the UI saves it. */
+  onReferenceChange = () => {};
   onReference = () => {};
 
   // ---------------------------------------------------------------- view
@@ -1206,9 +1264,12 @@ export class Editor {
   }
 
   nudge(dx: number, dy: number) {
-    if (!this.selection.length) return;
-    this.selection.forEach((i) => i.translate(new paper.Point(dx, dy)));
-    this.commit();
+    if (!this.targets.length) return;
+    this.targets.forEach((i) => i.translate(new paper.Point(dx, dy)));
+    if (this.refEditing) {
+      this.saveReference();
+      this.drawUI();
+    } else this.commit();
   }
 
   setBounds(next: { x: number; y: number; w: number; h: number }) {
@@ -1216,11 +1277,15 @@ export class Editor {
     if (!b) return;
     const sx = b.width ? Math.max(1, next.w) / b.width : 1;
     const sy = b.height ? Math.max(1, next.h) / b.height : 1;
-    this.selection.forEach((i) => {
+    this.targets.forEach((i) => {
       if (sx !== 1 || sy !== 1) i.scale(sx, sy, b.topLeft);
       i.translate(new paper.Point(next.x - b.x, next.y - b.y));
     });
-    this.commit();
+    if (this.refEditing) {
+      this.saveReference();
+      this.drawUI();
+      this.onLive();
+    } else this.commit();
   }
 
   setFill(f: Fill, final: boolean) {
@@ -1357,6 +1422,12 @@ export class Editor {
       if (run[k]) { e.preventDefault(); run[k](); }
       return;
     }
+    if (this.refEditing && (e.key === 'Escape' || e.key === 'Enter')) {
+      e.preventDefault();
+      this.editReference(false);
+      return;
+    }
+    if (this.refEditing && (e.key === 'Delete' || e.key === 'Backspace')) return;
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
       if (this.tool === 'node' && this.selectedPaths().some((p) => p.segments.some((s) => s.selected))) this.deleteSegments();

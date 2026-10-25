@@ -30,7 +30,12 @@
             <p class="muted small">Sits under your shapes for tracing. Never exported.</p>
             <div class="row">
               <label class="check"><input id="ref-show" type="checkbox" checked /><span>Show</span></label>
-              <label class="opacity"><span>Fade</span><input id="ref-opacity" type="range" min="0.05" max="1" step="0.05" /></label>
+              <label class="opacity"><span>Opacity</span><input id="ref-opacity" type="range" min="0.05" max="1" step="0.05" /><output id="ref-opacity-val">40%</output></label>
+            </div>
+            <button class="btn small wide-btn" id="ref-move" title="Drag the image to move it, drag a corner to resize it"><i data-icon="move"></i>Move and resize</button>
+            <div class="row">
+              <button class="btn small" id="ref-fit" title="Show the whole image inside the artboard">Fit inside</button>
+              <button class="btn small" id="ref-fill" title="Cover the whole artboard, cropping the edges">Fill artboard</button>
             </div>
             <div class="row">
               <label class="btn small">Replace<input id="ref-replace" type="file" accept="image/*" hidden /></label>
@@ -75,6 +80,10 @@
         </div>
         <div class="drop" id="drop" hidden><span>Drop an SVG to import it, or an image to trace over</span></div>
         <div class="hint" id="hint"></div>
+        <div class="ref-bar" id="ref-bar" hidden>
+          <span><b>Adjusting the reference image.</b> Drag to move, drag a corner to resize, or type a size in the panel.</span>
+          <button class="btn small primary" id="ref-done">Done</button>
+        </div>
       </section>
 
       <aside class="panel">

@@ -23,7 +23,7 @@ Free, open source, and it runs entirely in your browser. Nothing is uploaded.
 - **Icon library:** about 1,500 [Phosphor](https://phosphoricons.com) icons in outline, bold, filled and duotone, searchable by name or meaning ("money" finds wallets and coins) and by category. Each one comes in as an editable shape in your colour, ready to combine with Union or Subtract.
 - **Snapping:** to the artboard's edges and centre and to other shapes. Hold ⌘ or Ctrl to skip it, or switch it off in the top bar.
 - **Layers:** select, rename, reorder by dragging, hide and lock.
-- **Reference image:** put a picture under your shapes to trace over. Fade it, hide it or replace it. It is never exported.
+- **Reference image** (top bar): put a picture under your shapes to trace over. Set its opacity, hide it, fit or fill the artboard, or move and resize it freely (drag, drag a corner, or type a size). It is never exported and is kept after a reload.
 - **Guides:** iOS mask outline, Android safe zone and centre lines.
 - **Preview:** live iOS, Android and favicon previews while you draw.
 - **Import and export SVG** (drag and drop works too), plus a 1024 px PNG and a Copy SVG code button.
