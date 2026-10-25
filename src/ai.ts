@@ -235,33 +235,70 @@ export const EXAMPLES = [
 
 // ---------------------------------------------------------------- SVG safety
 
-/** The first SVG document in a reply, from a ```svg block or bare markup. */
+/** The SVG document in a reply, from the first <svg to the last </svg> (so nested <svg> survive). */
 export function extractSvg(text: string): string | null {
-  const m = text.match(/<svg[\s\S]*?<\/svg>/i);
-  return m ? m[0] : null;
+  const start = text.search(/<svg[\s>]/i);
+  const end = text.toLowerCase().lastIndexOf('</svg>');
+  if (start < 0 || end < start) return null;
+  let svg = text.slice(start, end + 6);
+  // Models sometimes leave out the namespace, which would make every element unknown.
+  if (!/^<svg[^>]*\sxmlns=/i.test(svg)) svg = svg.replace(/^<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+  return svg;
 }
 
-const BLOCKED = new Set(['script', 'foreignobject', 'image', 'style', 'iframe', 'object', 'embed', 'a', 'audio', 'video', 'animate', 'animatetransform', 'animatemotion', 'set']);
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Elements a drawing needs. Everything else (scripts, images, foreign content, styles, animation) is dropped. */
+const ELEMENTS = new Set([
+  'svg', 'g', 'defs', 'title', 'desc', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'path',
+  'lineargradient', 'radialgradient', 'stop', 'use', 'clippath',
+]);
+
+/** Presentation and geometry attributes that are safe to keep, by local name. */
+const ATTRIBUTES = new Set([
+  'id', 'viewbox', 'width', 'height', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'fx', 'fy',
+  'd', 'points', 'transform', 'fill', 'fill-opacity', 'fill-rule', 'clip-rule', 'clip-path', 'stroke',
+  'stroke-width', 'stroke-opacity', 'stroke-linecap', 'stroke-linejoin', 'stroke-miterlimit',
+  'stroke-dasharray', 'stroke-dashoffset', 'opacity', 'offset', 'stop-color', 'stop-opacity',
+  'gradientunits', 'gradienttransform', 'spreadmethod', 'preserveaspectratio', 'visibility', 'display',
+  'clippathunits', 'href',
+]);
+
+/** Only references to something inside this document. */
+const safeValue = (v: string) => !/[\\]|url\s*\(\s*['"]?(?!#)|image-set|expression\s*\(|javascript:|data:/i.test(v);
 
 /**
- * Removes anything that could load or run something: scripts, embedded documents, images,
- * event handlers and links to other documents. Only the drawing remains.
+ * Keeps only drawing elements and attributes (an allowlist), so nothing in an AI reply can load,
+ * run or link to anything. Inline `style` is turned into the plain attributes above, or dropped.
  */
 export function sanitizeSvg(svg: string): string {
   const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
   const root = doc.documentElement;
-  if (root.nodeName.toLowerCase() !== 'svg' || doc.getElementsByTagName('parsererror').length) throw new Error('The model did not return a valid SVG. Try again.');
+  if (root.namespaceURI !== SVG_NS || root.localName !== 'svg' || doc.getElementsByTagName('parsererror').length)
+    throw new Error('The model did not return a valid SVG. Try again.');
   const walk = (el: Element) => {
     for (const child of [...el.children]) {
-      if (BLOCKED.has(child.localName.toLowerCase())) child.remove();
+      if (child.namespaceURI !== SVG_NS || !ELEMENTS.has(child.localName.toLowerCase())) child.remove();
       else walk(child);
     }
+    // Fold simple inline styles into attributes before the attribute pass.
+    const style = el.getAttribute('style');
+    if (style) {
+      for (const decl of style.split(';')) {
+        const i = decl.indexOf(':');
+        if (i < 0) continue;
+        const prop = decl.slice(0, i).trim().toLowerCase();
+        const value = decl.slice(i + 1).trim();
+        if (ATTRIBUTES.has(prop) && prop !== 'href' && safeValue(value) && !el.hasAttribute(prop)) el.setAttribute(prop, value);
+      }
+    }
     for (const attr of [...el.attributes]) {
-      const name = attr.name.toLowerCase();
-      const value = attr.value.trim().toLowerCase();
-      if (name.startsWith('on')) el.removeAttribute(attr.name);
-      else if ((name === 'href' || name === 'xlink:href') && !value.startsWith('#')) el.removeAttribute(attr.name);
-      else if (/javascript:|url\(\s*['"]?(?!#)/.test(value)) el.removeAttribute(attr.name);
+      const name = attr.localName.toLowerCase();
+      const value = attr.value.trim();
+      const isXmlns = attr.name === 'xmlns' || attr.name.startsWith('xmlns:');
+      if (isXmlns) continue;
+      const keep = ATTRIBUTES.has(name) && (name === 'href' ? value.startsWith('#') : safeValue(value));
+      if (!keep) el.removeAttributeNode(attr);
     }
   };
   walk(root);

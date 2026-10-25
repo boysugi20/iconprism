@@ -912,3 +912,9 @@ kbd {
 .tool-tip small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; text-wrap: pretty; }
 .tools button:hover .tool-tip, .tools button:focus-visible .tool-tip { opacity: 1; transform: translate(0, -50%); transition-delay: 0.25s; }
 @media (hover: none) { .tool-tip { display: none; } }
+
+/* Tablets keep the zoom buttons as well as pinch; phones have room only for pinch. */
+@media (hover: none) and (min-width: 701px) and (max-width: 1000px) {
+  #zoom-in, #zoom-out { display: inline-grid; }
+}
+#canvas { touch-action: none; }

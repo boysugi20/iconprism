@@ -66,7 +66,8 @@ function mods(e: paper.ToolEvent) {
 }
 
 export function isText(item: paper.Item | null | undefined): item is paper.CompoundPath {
-  return item instanceof paper.CompoundPath && !!item.data?.text;
+  const t = item?.data?.text;
+  return item instanceof paper.CompoundPath && !!t && typeof t.content === 'string' && typeof t.font === 'string';
 }
 
 export const solid = (color: string): Fill => ({ type: 'solid', color, color2: '#ffffff', angle: 90 });
@@ -121,6 +122,8 @@ export function readFill(item: paper.Item): Fill {
 
 /** Reads a solid or linear-gradient fill from an SVG element, for turning a background rect into the artboard background. */
 function fillFromSvg(el: Element, doc: Document): Fill | null {
+  // A see-through background rectangle stays a normal layer.
+  for (const a of ['opacity', 'fill-opacity']) if (el.getAttribute(a) && parseFloat(el.getAttribute(a)!) < 1) return null;
   const styleFill = /(?:^|;)\s*fill\s*:\s*([^;]+)/.exec(el.getAttribute('style') ?? '')?.[1];
   const raw = (styleFill ?? el.getAttribute('fill') ?? '#000000').trim();
   const css = (c: string) => {
@@ -137,6 +140,8 @@ function fillFromSvg(el: Element, doc: Document): Fill | null {
   }
   const grad = doc.getElementById(ref);
   if (!grad || grad.localName !== 'linearGradient') return null;
+  // Transformed gradients are hard to read back; keep such a rectangle as a normal layer instead.
+  if (grad.getAttribute('gradientTransform')) return null;
   let stopsFrom: Element = grad;
   const href = (grad.getAttribute('href') ?? grad.getAttribute('xlink:href'))?.replace(/^#/, '');
   if (!grad.getElementsByTagName('stop').length && href) stopsFrom = doc.getElementById(href) ?? grad;
@@ -154,6 +159,38 @@ function fillFromSvg(el: Element, doc: Document): Fill | null {
   };
   const angle = Math.round((Math.atan2(num('y2', 0) - num('y1', 0), num('x2', 1) - num('x1', 0)) * 180) / Math.PI);
   return { type: 'linear', color: a, color2: b, angle };
+}
+
+const RESERVED_IDS = new Set(['constructor', '__proto__', 'prototype', 'toString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf', 'propertyIsEnumerable', 'toLocaleString']);
+
+/**
+ * Light clean-up for SVG files people import: removes scripts, foreign content and remote images
+ * (which would load from the network), event handlers and data-* attributes, and renames ids that
+ * clash with JavaScript object keys, which Paper uses as names.
+ */
+function cleanSvgForImport(svg: string): string {
+  const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const root = doc.documentElement;
+  if (root.localName !== 'svg' || doc.getElementsByTagName('parsererror').length) return svg;
+  const renames = new Map<string, string>();
+  for (const el of [root, ...root.querySelectorAll('*')]) {
+    const name = el.localName.toLowerCase();
+    if (['script', 'foreignobject', 'iframe', 'object', 'embed', 'style'].includes(name)) { el.remove(); continue; }
+    for (const attr of [...el.attributes]) {
+      const n = attr.localName.toLowerCase();
+      const v = attr.value.trim();
+      if (n.startsWith('on') || n.startsWith('data-')) el.removeAttributeNode(attr);
+      else if (n === 'href' && !v.startsWith('#') && !(name === 'image' && v.startsWith('data:image/'))) el.removeAttributeNode(attr);
+      else if (n === 'id' && (RESERVED_IDS.has(v) || /^\d+$/.test(v))) {
+        renames.set(v, `id-${v}`);
+        attr.value = `id-${v}`;
+      }
+    }
+    if (name === 'image' && !el.getAttribute('href') && !el.getAttribute('xlink:href')) el.remove();
+  }
+  let out = new XMLSerializer().serializeToString(root);
+  for (const [from, to] of renames) out = out.split(`#${from})`).join(`#${to})`).split(`"#${from}"`).join(`"#${to}"`);
+  return out;
 }
 
 export class Editor {
@@ -237,7 +274,8 @@ export class Editor {
     tool.onMouseMove = (e: paper.ToolEvent) => this.hover(e);
 
     canvas.addEventListener('wheel', (e) => this.wheel(e), { passive: false });
-    canvas.addEventListener('dblclick', (e) => this.doubleClick(e));
+    canvas.addEventListener('dblclick', (e) => this.doubleClickAt(paper.view.viewToProject(new paper.Point(e.offsetX, e.offsetY))));
+    this.attachTouchGestures(canvas);
     window.addEventListener('keydown', (e) => this.keyDown(e));
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space') {
@@ -374,6 +412,7 @@ export class Editor {
   }
 
   undo() {
+    this.editReference(false);
     this.finishPen();
     this.onBeforeHistory();
     if (this.hIndex <= 0) return;
@@ -383,6 +422,7 @@ export class Editor {
   }
 
   redo() {
+    this.editReference(false);
     this.finishPen();
     this.onBeforeHistory();
     if (this.hIndex >= this.history.length - 1) return;
@@ -447,6 +487,8 @@ export class Editor {
   // ---------------------------------------------------------------- selection
 
   select(items: paper.Item[]) {
+    // Picking artwork ends reference adjusting, so commands never act on both at once.
+    if (this.refEditing && items.length) this.editReference(false);
     paper.project.deselectAll();
     this.selection = items.filter((i) => i.parent === this.content);
     if (this.tool === 'node') this.selection.forEach((i) => (i.selected = true));
@@ -587,8 +629,21 @@ export class Editor {
     this.canvas.style.cursor = this.spaceDown ? 'grab' : this.tool === 'text' ? 'text' : draw ? 'crosshair' : 'default';
   }
 
+  private lastTap: { t: number; pt: paper.Point } | null = null;
+
   private down(e: paper.ToolEvent) {
     const native = (e as unknown as { event: MouseEvent }).event;
+    // Touch screens have no dblclick: two quick taps in one place count as a double-click.
+    if (typeof TouchEvent !== 'undefined' && native instanceof TouchEvent) {
+      const now = Date.now();
+      const last = this.lastTap;
+      this.lastTap = { t: now, pt: e.point };
+      if (last && now - last.t < 350 && last.pt.getDistance(e.point) < 24 / paper.view.zoom) {
+        this.lastTap = null;
+        this.doubleClickAt(e.point);
+        return;
+      }
+    }
     if (this.spaceDown || native.button === 1) {
       this.drag = { kind: 'pan', x: native.clientX, y: native.clientY };
       return;
@@ -997,8 +1052,7 @@ export class Editor {
     this.commit();
   }
 
-  private doubleClick(ev: MouseEvent) {
-    const pt = paper.view.viewToProject(new paper.Point(ev.offsetX, ev.offsetY));
+  private doubleClickAt(pt: paper.Point) {
     if (this.tool === 'pen') { this.finishPen(); return; }
     if (this.tool === 'select') {
       const item = this.topItemAt(pt);
@@ -1087,7 +1141,10 @@ export class Editor {
   }
 
   renameItem(item: paper.Item, name: string) {
-    item.name = name.trim() || null as unknown as string;
+    // A label in data, not item.name: Paper rejects names that are numbers or object keys.
+    const label = name.trim().slice(0, 60);
+    if (label) item.data.label = label;
+    else delete item.data.label;
     this.commit();
   }
 
@@ -1142,12 +1199,13 @@ export class Editor {
   editReference(on: boolean) {
     if (on && !this.refRaster) return;
     if (on === this.refEditing) return;
-    this.refEditing = on;
     if (on) {
-      this.reference.visible = true;
+      this.finishPen();
       if (this.tool !== 'select') this.setTool('select');
       this.select([]);
+      this.reference.visible = true;
     }
+    this.refEditing = on;
     this.applyReference();
     this.drawUI();
     this.onSelect();
@@ -1167,6 +1225,55 @@ export class Editor {
   /** The reference image moved or resized; the UI saves it. */
   onReferenceChange = () => {};
   onReference = () => {};
+
+  /** Two fingers pan and pinch-zoom the view. Paper never sees those touches. */
+  private attachTouchGestures(canvas: HTMLCanvasElement) {
+    let gesture: { dist: number; mid: paper.Point } | null = null;
+    const read = (t: TouchList) => {
+      const r = canvas.getBoundingClientRect();
+      const a = new paper.Point(t[0].clientX - r.left, t[0].clientY - r.top);
+      const b = new paper.Point(t[1].clientX - r.left, t[1].clientY - r.top);
+      return { dist: Math.max(1, a.getDistance(b)), mid: a.add(b).divide(2) };
+    };
+    const opts = { capture: true, passive: false } as const;
+    canvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length < 2) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.cancelDrag();
+      gesture = read(e.touches);
+    }, opts);
+    canvas.addEventListener('touchmove', (e) => {
+      if (!gesture || e.touches.length < 2) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const now = read(e.touches);
+      const v = paper.view;
+      // Keep the point under the fingers' midpoint fixed while zooming, then follow the fingers.
+      const anchor = v.viewToProject(gesture.mid);
+      v.zoom = Math.min(32, Math.max(0.05, v.zoom * (now.dist / gesture.dist)));
+      v.center = v.center.add(anchor.subtract(v.viewToProject(now.mid)));
+      gesture = now;
+      this.drawUI();
+      this.onView();
+    }, opts);
+    const end = (e: TouchEvent) => {
+      if (!gesture) return;
+      e.stopImmediatePropagation();
+      if (e.touches.length < 2) gesture = null;
+    };
+    canvas.addEventListener('touchend', end, opts);
+    canvas.addEventListener('touchcancel', end, opts);
+  }
+
+  /** Abandons the gesture in progress, removing a half-drawn shape. */
+  private cancelDrag() {
+    const d = this.drag;
+    if (d?.kind === 'create') d.item?.remove();
+    this.drag = null;
+    this.snapGuides = { x: [], y: [] };
+    this.drawUI();
+  }
 
   // ---------------------------------------------------------------- view
 
@@ -1403,27 +1510,42 @@ export class Editor {
   }
 
   /**
-   * Adds an SVG to the artboard. `fit` is the share of the artboard its longer side fills
-   * (default 0.6); `fill` repaints every shape, as for library icons.
+   * Parses an SVG into a detached item: cleaned, with Paper's viewBox clip removed and
+   * single-shape groups unwrapped. Throws if there is nothing drawable in it.
    */
-  importSVG(svg: string, opts: { fit?: number; fill?: Fill; name?: string; silent?: boolean } = {}): paper.Item {
-    let item = paper.project.importSVG(svg, { expandShapes: true, insert: false }) as paper.Item | null;
+  private parseSvg(svg: string): paper.Item {
+    let item = paper.project.importSVG(cleanSvgForImport(svg), { expandShapes: true, insert: false }) as paper.Item | null;
     if (!item) throw new Error('Could not read that SVG.');
+    // data-* attributes become item.data, which the editor uses for its own state (text, fills).
+    for (const it of [item, ...item.getItems({})]) it.data = {};
     // Paper wraps the viewBox in a clip rectangle; drop it so ungrouping behaves.
     if (item instanceof paper.Group && item.firstChild?.clipMask) {
       item.firstChild.remove();
       item.clipped = false;
     }
     // Unwrap groups that hold a single shape, so Union and point editing work right away.
-    let unwrapped: paper.Item = item;
-    while (unwrapped instanceof paper.Group && unwrapped.children.length === 1) {
-      const only = unwrapped.firstChild;
-      only.transform(unwrapped.matrix);
-      unwrapped = only;
+    while (item instanceof paper.Group && !item.clipped && item.children.length === 1) {
+      const group: paper.Group = item;
+      const only = group.firstChild;
+      only.transform(group.matrix);
+      only.opacity *= group.opacity;
+      if (group.blendMode !== 'normal') only.blendMode = group.blendMode;
+      if (group.name && !only.name) only.name = group.name;
+      only.remove();
+      item = only;
     }
-    item = unwrapped;
     const b = item.bounds;
     if (!b.width && !b.height) throw new Error('That SVG has nothing to import.');
+    return item;
+  }
+
+  /**
+   * Adds an SVG to the artboard. `fit` is the share of the artboard its longer side fills
+   * (default 0.6); `fill` repaints every shape, as for library icons.
+   */
+  importSVG(svg: string, opts: { fit?: number; fill?: Fill; name?: string; silent?: boolean } = {}): paper.Item {
+    const item = this.parseSvg(svg);
+    const b = item.bounds;
     this.content.addChild(item);
     // A full 1024 artboard (like one exported here) keeps its exact layout; anything else is fitted and centred.
     const root = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement;
@@ -1436,10 +1558,10 @@ export class Editor {
     if (opts.fill) {
       // Repaint each shape; duotone icons keep their faded second tone through opacity.
       const shapes = item instanceof paper.Group ? item.getItems({ class: paper.PathItem }) : [item];
-      for (const s of shapes) applyFill(s, opts.fill);
+      for (const sh of shapes) applyFill(sh, opts.fill);
       if (opts.fill.type === 'linear' && item instanceof paper.Group) applyFill(item, opts.fill);
     }
-    if (opts.name) item.name = opts.name;
+    if (opts.name) item.data.label = opts.name;
     if (opts.silent) return item;
     this.setTool('select');
     this.select([item]);
@@ -1448,20 +1570,23 @@ export class Editor {
   }
 
   /**
-   * Puts an SVG designed as a whole icon (any square viewBox) onto the artboard, for AI results.
-   * 'replace' swaps the whole icon as one undo step, turning a full-size first rectangle into the
-   * artboard background; 'add' puts the artwork on top of what is there.
+   * Puts an SVG designed as a whole icon onto the artboard, for AI results. 'replace' swaps the
+   * whole icon as one undo step, turning a full-size first rectangle into the artboard background;
+   * 'add' puts the artwork on top. The drawing is parsed before anything is cleared, so a reply
+   * that can't be read leaves the document untouched.
    */
   placeIconSvg(svg: string, mode: 'replace' | 'add'): paper.Item | null {
     const SVGNS = 'http://www.w3.org/2000/svg';
     const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
     const root = doc.documentElement;
-    if (root.localName !== 'svg') throw new Error('Not an SVG.');
-    const vb = (root.getAttribute('viewBox') ?? `0 0 ${root.getAttribute('width') ?? ART} ${root.getAttribute('height') ?? ART}`)
-      .trim()
-      .split(/[\s,]+/)
-      .map(Number);
-    const [vx, vy, vw, vh] = vb.length === 4 && vb.every(Number.isFinite) && vb[2] > 0 && vb[3] > 0 ? vb : [0, 0, ART, ART];
+    if (root.localName !== 'svg') throw new Error('That is not an SVG drawing.');
+    // Units like "512px" count; percentages and missing sizes fall back to the artboard size.
+    const len = (v: string | null) => (v && !v.trim().endsWith('%') && parseFloat(v) > 0 ? parseFloat(v) : ART);
+    const vbAttr = root.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
+    const [vx, vy, vw, vh] =
+      vbAttr && vbAttr.length === 4 && vbAttr.every(Number.isFinite) && vbAttr[2] > 0 && vbAttr[3] > 0
+        ? vbAttr
+        : [0, 0, len(root.getAttribute('width')), len(root.getAttribute('height'))];
     const drawable = () => [...root.children].filter((c) => !['defs', 'title', 'desc', 'metadata'].includes(c.localName));
 
     let bg: Fill | null = null;
@@ -1475,16 +1600,22 @@ export class Editor {
       }
     }
 
-    // Map the drawing's view onto the 1024 artboard.
+    // Fit the drawing's view into the 1024 artboard, centred if it isn't square.
     const s = ART / Math.max(vw, vh);
+    const tx = (ART - vw * s) / 2;
+    const ty = (ART - vh * s) / 2;
     const wrap = doc.createElementNS(SVGNS, 'g');
-    wrap.setAttribute('transform', `scale(${s}) translate(${-vx} ${-vy})`);
+    wrap.setAttribute('transform', `translate(${tx} ${ty}) scale(${s}) translate(${-vx} ${-vy})`);
     for (const c of drawable()) wrap.appendChild(c);
     root.appendChild(wrap);
     root.setAttribute('viewBox', `0 0 ${ART} ${ART}`);
     root.setAttribute('width', String(ART));
     root.setAttribute('height', String(ART));
     const out = new XMLSerializer().serializeToString(root);
+
+    // Parse first: if this throws, nothing on the artboard has changed.
+    let item: paper.Item | null = wrap.children.length ? this.parseSvg(out) : null;
+    if (!item && !bg) throw new Error('The drawing had nothing that could be placed.');
 
     this.finishPen();
     if (mode === 'replace') {
@@ -1495,23 +1626,20 @@ export class Editor {
       this.applyBackground();
     }
     this.content.activate();
-    let item: paper.Item | null = null;
-    if (wrap.children.length) {
-      try {
-        item = this.importSVG(out, { silent: true });
-      } catch {
-        item = null; // background only
+    let placed: paper.Item[] = [];
+    if (item) {
+      this.content.addChild(item);
+      placed = [item];
+      // Unpack the drawing into separate layers so each shape is easy to pick and restyle.
+      if (item instanceof paper.Group && !item.clipped) {
+        const group: paper.Group = item;
+        const kids = group.removeChildren();
+        for (const k of kids) k.opacity *= group.opacity;
+        this.content.insertChildren(group.index, kids);
+        group.remove();
+        placed = kids;
+        item = kids[kids.length - 1] ?? null;
       }
-    }
-    // Unpack the drawing into separate layers so each shape is easy to pick and restyle.
-    let placed: paper.Item[] = item ? [item] : [];
-    if (item instanceof paper.Group && !item.clipped && item.parent === this.content) {
-      const kids = item.removeChildren();
-      for (const k of kids) k.opacity *= item.opacity;
-      this.content.insertChildren(item.index, kids);
-      item.remove();
-      placed = kids;
-      item = kids[kids.length - 1] ?? null;
     }
     this.setTool('select');
     this.select(placed);

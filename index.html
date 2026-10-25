@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Scripts only from this site. AI calls may go to any https provider or a model on this computer. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' data: blob: https: http://localhost:* http://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <title>iconprism · app icon editor</title>
     <meta name="description" content="Draw an app icon with simple vector tools, then export every iOS, Android and web size in one ZIP. Free, open source, runs in your browser." />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />

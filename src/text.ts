@@ -126,7 +126,9 @@ export function loadFont(id: string, weight: number): Promise<LoadedFont> {
 export async function addCustomFont(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
   const font = await parse(buffer);
-  const name = font.names.fontFamily?.en || file.name.replace(/\.[^.]+$/, '');
+  // Font names are untrusted text: keep printable characters only, and keep them short.
+  const raw = font.names.fontFamily?.en || file.name.replace(/\.[^.]+$/, '');
+  const name = raw.replace(/[^\p{L}\p{N} ._-]/gu, '').trim().slice(0, 40) || 'Uploaded font';
   const weight = (font.tables.os2 as { usWeightClass?: number } | undefined)?.usWeightClass ?? 400;
   const id = `custom:${name}:${weight}`;
   if (custom.has(id)) return id;

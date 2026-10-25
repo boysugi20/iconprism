@@ -32,6 +32,12 @@ hydrateIcons();
 // ---------------------------------------------------------------- toast
 
 let toastTimer = 0;
+/** Shows any thrown error as a toast and logs it. */
+function showError(err: unknown) {
+  console.error(err);
+  toast((err as Error)?.message || 'Something went wrong.');
+}
+
 function toast(msg: string) {
   const t = $('toast');
   t.textContent = msg;
@@ -134,10 +140,20 @@ function syncTextPanel() {
   if (!show) return;
   const spec = currentTextSpec();
   $('text-scope').textContent = editing ? 'editing' : selectedText().length ? 'selection' : 'new text';
-  tFont.innerHTML = allFonts().map((f) => `<option value="${f.id}">${f.name}</option>`).join('');
+  // Options are built as nodes, never HTML: an uploaded font's name is untrusted text.
+  const fonts = allFonts();
+  const fontKey = fonts.map((f) => f.id).join('|');
+  if (tFont.dataset.key !== fontKey) {
+    tFont.replaceChildren(...fonts.map((f) => new Option(f.name, f.id)));
+    tFont.dataset.key = fontKey;
+  }
   tFont.value = spec.font;
   const weights = fontInfo(spec.font)?.weights ?? [400];
-  tWeight.innerHTML = weights.map((w) => `<option value="${w}">${WEIGHT_NAMES[w] ?? w}</option>`).join('');
+  const weightKey = weights.join('|');
+  if (tWeight.dataset.key !== weightKey) {
+    tWeight.replaceChildren(...weights.map((w) => new Option(WEIGHT_NAMES[w] ?? String(w), String(w))));
+    tWeight.dataset.key = weightKey;
+  }
   tWeight.value = String(nearestWeight(spec.font, spec.weight));
   tSize.value = String(spec.size);
   tSpacing.value = String(spec.spacing);
@@ -395,11 +411,16 @@ function schedulePreview() {
   previewTimer = window.setTimeout(renderPreviews, 120);
 }
 
+/** A background set to "None" counts as no background, so stores still get an opaque icon. */
+function hasBackground() {
+  return editor.background.enabled && editor.background.fill.type !== 'none';
+}
+
 function svgs() {
   return {
     full: editor.toSVG('full'),
-    bg: editor.background.enabled ? editor.toSVG('background') : null,
-    bgBleed: editor.background.enabled ? editor.toSVG('background-bleed') : null,
+    bg: hasBackground() ? editor.toSVG('background') : null,
+    bgBleed: hasBackground() ? editor.toSVG('background-bleed') : null,
     fg: editor.toSVG('foreground'),
   };
 }
@@ -441,12 +462,21 @@ function previewImages(imgs: IconImages): PreviewImages {
   };
 }
 
+let deviceRender = 0;
+let deviceCache: { key: string; images: PreviewImages } | null = null;
+
 async function renderDevices(imgs?: IconImages) {
+  const run = ++deviceRender;
   $('device-view').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.v === deviceView));
   $('device-theme').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.v === deviceTheme));
   const stage = $('device-stage');
+  // The icon images only change when the artwork does, not when the name or view changes.
+  const parts = svgs();
+  const key = JSON.stringify(parts);
+  if (deviceCache?.key !== key) deviceCache = { key, images: previewImages(imgs ?? (await loadImages(parts))) };
+  if (run !== deviceRender) return; // a newer render started while this one waited
   stage.dataset.theme = deviceTheme;
-  stage.innerHTML = deviceHtml(deviceView, previewImages(imgs ?? (await loadImages(svgs()))), deviceName.value, deviceTheme);
+  stage.innerHTML = deviceHtml(deviceView, deviceCache.images, deviceName.value, deviceTheme);
   // Scale the phone (664 px tall with its frame) to fit the dialog on short screens.
   const room = stage.clientHeight - 56;
   stage.style.setProperty('--fit', String(Math.max(0.55, Math.min(1, room / 664))));
@@ -456,25 +486,27 @@ function openDevices() {
   editor.finishPen();
   deviceName.value = appName();
   deviceDialog.showModal();
-  renderDevices().catch((err) => toast((err as Error).message));
+  renderDevices().catch(showError);
 }
 
 $('device-view').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
   if (!b) return;
   deviceView = b.dataset.v as DeviceView;
-  renderDevices();
+  renderDevices().catch(showError);
 });
 $('device-theme').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
   if (!b) return;
   deviceTheme = b.dataset.v as 'light' | 'dark';
-  renderDevices();
+  renderDevices().catch(showError);
 });
+let nameTimer = 0;
 deviceName.addEventListener('input', () => {
   // One app name everywhere: the export dialog uses it too.
   $<HTMLInputElement>('x-name').value = deviceName.value;
-  renderDevices();
+  clearTimeout(nameTimer);
+  nameTimer = window.setTimeout(() => renderDevices().catch(showError), 150);
 });
 $('mini-preview').addEventListener('click', openDevices);
 $('preview-btn').addEventListener('click', openDevices);
@@ -502,6 +534,7 @@ for (const a of ['left', 'hcenter', 'right', 'top', 'vcenter', 'bottom'] as Alig
 document.querySelector('.panel')!.addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-cmd]');
   if (!b) return;
+  if (editor.refEditing) { toast('Press Done to finish adjusting the reference image first.'); return; }
   if (!editor.selection.length) { toast('Select something first.'); return; }
   commands[b.dataset.cmd!]?.();
 });
@@ -679,23 +712,27 @@ $('icon-cats').innerHTML =
   `<button type="button" class="chip on" data-cat="">All</button>` +
   CATEGORIES.map((c) => `<button type="button" class="chip" data-cat="${c.id}">${c.label}</button>`).join('');
 
+let iconRender = 0;
 async function renderIcons() {
+  const run = ++iconRender;
   $('icon-weight').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.v === iconWeight));
   $('icon-cats').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', (b.dataset.cat || null) === iconCategory));
   iconGrid.classList.add('loading');
   try {
-    const [catalog, svgs] = await Promise.all([loadCatalog(), loadWeight(iconWeight)]);
+    const weight = iconWeight;
+    const [catalog, svgs] = await Promise.all([loadCatalog(), loadWeight(weight)]);
+    if (run !== iconRender) return;
     iconResults = searchIcons(catalog, iconSearch.value, iconCategory).filter((i) => svgs.has(i.name));
     const shown = iconResults.slice(0, iconLimit);
     iconGrid.innerHTML = shown.length
       ? shown
-          .map((i) => `<button type="button" class="ic" data-icon-name="${i.name}" title="${esc(i.label)}" role="option">${svgs.get(i.name)}<span>${esc(i.label)}</span></button>`)
+          .map((i) => `<button type="button" class="ic" data-icon-name="${i.name}" data-weight="${weight}" title="${esc(i.label)}" role="option">${svgs.get(i.name)}<span>${esc(i.label)}</span></button>`)
           .join('') + (iconResults.length > shown.length ? `<button type="button" class="more-icons" id="icons-more">Show more (${iconResults.length - shown.length} left)</button>` : '')
       : `<p class="muted">No icons match “${esc(iconSearch.value)}”. Try a simpler word, like heart, money or chat.</p>`;
   } catch {
-    iconGrid.innerHTML = '<p class="muted">Could not load the icon library. Check your connection and try again.</p>';
+    if (run === iconRender) iconGrid.innerHTML = '<p class="muted">Could not load the icon library. Check your connection and try again.</p>';
   } finally {
-    iconGrid.classList.remove('loading');
+    if (run === iconRender) iconGrid.classList.remove('loading');
   }
 }
 
@@ -731,12 +768,19 @@ iconHex.addEventListener('change', () => {
 iconGrid.addEventListener('click', async (e) => {
   const el = e.target as HTMLElement;
   if (el.closest('#icons-more')) { iconLimit += PAGE; renderIcons(); return; }
-  const name = el.closest<HTMLButtonElement>('[data-icon-name]')?.dataset.iconName;
-  if (!name) return;
-  const svg = (await loadWeight(iconWeight)).get(name);
-  if (!svg) return;
-  if (editing) cancelText();
-  editor.importSVG(withColor(svg, iconColor.value), { fit: 0.56, fill: { type: 'solid', color: iconColor.value, color2: '#ffffff', angle: 90 }, name });
+  const btn = el.closest<HTMLButtonElement>('[data-icon-name]');
+  const name = btn?.dataset.iconName;
+  if (!btn || !name) return;
+  try {
+    // Use the weight the clicked icon was drawn in, even if the style changed since.
+    const svg = (await loadWeight((btn.dataset.weight as IconWeight) ?? iconWeight)).get(name);
+    if (!svg) return;
+    if (editing) cancelText();
+    editor.importSVG(withColor(svg, iconColor.value), { fit: 0.56, fill: { type: 'solid', color: iconColor.value, color2: '#ffffff', angle: 90 }, name });
+  } catch (err) {
+    showError(err);
+    return;
+  }
   if (!(e as MouseEvent).shiftKey) iconsDialog.close();
   toast('Icon added. Change its colour in Fill, or select it with other shapes to combine them.');
 });
@@ -789,6 +833,7 @@ $('tab-design').addEventListener('click', () => setTab(false));
 $('tab-layers').addEventListener('click', () => setTab(true));
 
 function layerName(item: paper.Item): string {
+  if (typeof item.data?.label === 'string' && item.data.label) return item.data.label;
   if (item.name) return item.name;
   if (isText(item)) return `“${(item.data.text as TextSpec).content.split('\n')[0].slice(0, 24)}”`;
   if (item instanceof paper.Group) return `Group (${item.children.length})`;
@@ -841,8 +886,9 @@ layersEl.addEventListener('dblclick', (e) => {
   const name = (e.target as HTMLElement).closest<HTMLElement>('.name');
   const li = name?.closest<HTMLLIElement>('li[data-id]');
   const item = itemById(li?.dataset.id);
-  if (!name || !item) return;
+  if (!name || !item || name.isContentEditable) return;
   name.contentEditable = 'plaintext-only';
+  if (name.contentEditable !== 'plaintext-only') name.contentEditable = 'true'; // older Firefox
   name.focus();
   getSelection()?.selectAllChildren(name);
   const finish = (save: boolean) => {
@@ -911,7 +957,26 @@ function saveReference() {
   }
 }
 
-function readImage(file: File): Promise<string> {
+/** Reads an image and shrinks it to at most 1600 px as WebP, so it fits in browser storage. */
+async function readImage(file: File): Promise<string> {
+  const original = await readDataUrl(file);
+  try {
+    const img = new Image();
+    img.src = original;
+    await img.decode();
+    const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+    const small = c.toDataURL('image/webp', 0.85);
+    return small.startsWith('data:image/webp') && small.length < original.length ? small : original;
+  } catch {
+    return original;
+  }
+}
+
+function readDataUrl(file: File): Promise<string> {
   return new Promise((res, rej) => {
     const r = new FileReader();
     r.onload = () => res(String(r.result));
@@ -923,7 +988,14 @@ function readImage(file: File): Promise<string> {
 async function setReferenceFile(file: File | undefined) {
   if (!file) return;
   if (!file.type.startsWith('image/')) { toast('Pick an image file (PNG, JPG, WebP, GIF or SVG).'); return; }
-  editor.setReference(await readImage(file));
+  let src: string;
+  try {
+    src = await readImage(file);
+  } catch {
+    toast('Could not read that image.');
+    return;
+  }
+  editor.setReference(src);
   saveReference();
   // Open the controls right away so opacity, move and resize are easy to find.
   const menu = $('ref-menu');
@@ -944,7 +1016,7 @@ $('ref-fill').addEventListener('click', () => editor.fitReference('cover'));
 for (const id of ['ref-file', 'ref-replace']) {
   $<HTMLInputElement>(id).addEventListener('change', (e) => {
     const input = e.target as HTMLInputElement;
-    setReferenceFile(input.files?.[0]);
+    setReferenceFile(input.files?.[0]).catch(showError);
     input.value = '';
   });
 }
@@ -987,7 +1059,7 @@ window.addEventListener('drop', async (e) => {
   } else if (/\.(ttf|otf|woff)$/i.test(file.name)) {
     toast('To use a font, select the text tool and press Upload font.');
   } else {
-    setReferenceFile(file);
+    setReferenceFile(file).catch(showError);
   }
 });
 
@@ -1043,6 +1115,7 @@ async function runAi() {
   const request = aiPrompt.value.trim();
   if (!request) { toast(aiMode === 'edit' ? 'Say what to change first.' : 'Describe the icon first.'); aiPrompt.focus(); return; }
   const settings = aiSettings;
+  if (insecureKeyUrl(settings)) { aiStatus.textContent = INSECURE; return; }
   aiRun = new AbortController();
   $('ai-result').hidden = true;
   const started = Date.now();
@@ -1051,7 +1124,8 @@ async function runAi() {
   syncAiDialog();
   try {
     const messages = buildMessages(aiMode, request, aiMode === 'edit' ? editor.toSVG() : undefined);
-    const reply = await chat(settings, messages, aiRun.signal);
+    // Give up after three minutes; Cancel aborts sooner.
+    const reply = await chat(settings, messages, AbortSignal.any([aiRun.signal, AbortSignal.timeout(180000)]));
     const svg = extractSvg(reply);
     if (!svg) throw new Error('The model answered without an SVG. Try again, or pick a stronger model in AI settings.');
     aiResult = sanitizeSvg(svg);
@@ -1104,7 +1178,14 @@ function openAi() {
 }
 $('ai-btn').addEventListener('click', openAi);
 $('ai-settings-btn').addEventListener('click', () => { aiDialog.close(); openAiSettings(true); });
-aiDialog.addEventListener('close', () => aiRun?.abort());
+aiDialog.addEventListener('close', () => {
+  aiRun?.abort();
+  const img = $('ai-preview').querySelector('img');
+  if (img) URL.revokeObjectURL(img.src);
+  $('ai-preview').replaceChildren();
+  $('ai-result').hidden = true;
+  aiResult = null;
+});
 
 // AI settings
 const aiProvider = $<HTMLSelectElement>('ai-provider');
@@ -1114,6 +1195,22 @@ const aiModel = $<HTMLInputElement>('ai-model');
 const aiRemember = $<HTMLInputElement>('ai-remember');
 const aiTestStatus = $('ai-test-status');
 aiProvider.innerHTML = PROVIDERS.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+
+/** Keys typed for each provider in this dialog, so switching provider never carries a key across. */
+const keysByProvider = new Map<string, string>();
+let modelsRequest = 0;
+
+/** A key may only travel over HTTPS, except to this computer. */
+function insecureKeyUrl(s: AiSettings): boolean {
+  if (!s.apiKey) return false;
+  try {
+    const u = new URL(s.baseUrl);
+    return u.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
+  } catch {
+    return false;
+  }
+}
+const INSECURE = 'This address uses http://, so your key would travel unencrypted. Use an https:// address, or remove the key.';
 
 function formSettings(): AiSettings {
   return { provider: aiProvider.value, baseUrl: aiBase.value.trim(), apiKey: aiKey.value.trim(), model: aiModel.value.trim(), remember: aiRemember.checked };
@@ -1135,11 +1232,13 @@ function openAiSettings(thenOpenAi: boolean) {
   const s = aiSettings;
   aiProvider.value = s?.provider ?? 'openrouter';
   syncProvider(!s);
+  keysByProvider.clear();
   if (s) {
     aiBase.value = s.baseUrl;
     aiKey.value = s.apiKey;
     aiModel.value = s.model;
     aiRemember.checked = s.remember;
+    keysByProvider.set(s.provider, s.apiKey);
   } else {
     aiKey.value = '';
     aiModel.value = '';
@@ -1151,7 +1250,13 @@ function openAiSettings(thenOpenAi: boolean) {
   if (!s && aiProvider.value === 'openrouter') loadModels(true);
 }
 
+let lastProvider = '';
+aiProvider.addEventListener('focus', () => (lastProvider = aiProvider.value));
 aiProvider.addEventListener('change', () => {
+  // Park the key under the provider it was typed for; show only this provider's key.
+  if (lastProvider) keysByProvider.set(lastProvider, aiKey.value.trim());
+  aiKey.value = keysByProvider.get(aiProvider.value) ?? '';
+  lastProvider = aiProvider.value;
   syncProvider(true);
   aiModel.value = '';
   $('ai-models').innerHTML = '';
@@ -1160,14 +1265,20 @@ aiProvider.addEventListener('change', () => {
 });
 
 async function loadModels(quiet = false) {
+  const s = formSettings();
+  if (insecureKeyUrl(s)) { aiTestStatus.textContent = INSECURE; return; }
+  const request = ++modelsRequest;
   aiTestStatus.textContent = 'Loading models…';
   try {
-    const ids = await listModels(formSettings());
+    // The automatic list (OpenRouter) needs no key, so none is sent.
+    const ids = await listModels(quiet ? { ...s, apiKey: '' } : s);
+    // A newer request, or a provider switch, makes this answer stale.
+    if (request !== modelsRequest || s.provider !== aiProvider.value) return;
     $('ai-models').innerHTML = ids.map((id) => `<option value="${esc(id)}"></option>`).join('');
     if (!aiModel.value) aiModel.value = suggestModel(ids);
     aiTestStatus.textContent = `${ids.length} models available. Type to search the list.`;
   } catch (err) {
-    aiTestStatus.textContent = quiet ? '' : (err as Error).message;
+    if (request === modelsRequest) aiTestStatus.textContent = quiet ? '' : (err as Error).message;
   }
 }
 $('ai-load-models').addEventListener('click', () => loadModels());
@@ -1175,9 +1286,10 @@ $('ai-load-models').addEventListener('click', () => loadModels());
 $('ai-test').addEventListener('click', async () => {
   const s = formSettings();
   if (!isReady(s)) { aiTestStatus.textContent = 'Fill in the key and model first.'; return; }
+  if (insecureKeyUrl(s)) { aiTestStatus.textContent = INSECURE; return; }
   aiTestStatus.textContent = 'Testing…';
   try {
-    await chat(s, [{ role: 'user', content: 'Reply with the single word: ok' }]);
+    await chat(s, [{ role: 'user', content: 'Reply with the single word: ok' }], AbortSignal.timeout(30000));
     aiTestStatus.textContent = 'Connected.';
   } catch (err) {
     aiTestStatus.textContent = (err as Error).message;
@@ -1191,6 +1303,7 @@ $('ai-save').addEventListener('click', (e) => {
   if (!s.baseUrl) { aiTestStatus.textContent = 'Enter the base URL.'; return; }
   if (p.needsKey && !s.apiKey) { aiTestStatus.textContent = 'Paste your API key.'; return; }
   if (!s.model) { aiTestStatus.textContent = 'Choose a model (press Load models).'; return; }
+  if (insecureKeyUrl(s)) { aiTestStatus.textContent = INSECURE; return; }
   aiSettings = s;
   saveSettings(s);
   aiSettingsDialog.close();
